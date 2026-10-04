@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "d2scriptviewer"
+description = "Visor y editor de scripts.obsp para Darksiders II Deathinitive Edition"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "BOTProT800" }]
+keywords = ["darksiders", "obsp", "bod", "scripts", "editor", "modding"]
+# Solo biblioteca estándar, a propósito: ningún paquete de PyPI.
+dependencies = []
+dynamic = ["version"]
+
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: Spanish",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Games/Entertainment",
+]
+
+[project.scripts]
+d2scriptviewer = "d2scriptviewer.cli:main"
+
+[tool.setuptools.dynamic]
+# Única fuente de verdad: la versión vive en el paquete, no duplicada aquí.
+version = { attr = "d2scriptviewer.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["d2scriptviewer*"]

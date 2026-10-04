@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.partial
+build/
+dist/
+*.egg-info/
+
+# Ningún dato del juego entra en el repositorio: ni el archivo, ni sus copias,
+# ni volcados o extractos.
+*.obsp
+*.obsp.tmp
+.d2sv_backups/
