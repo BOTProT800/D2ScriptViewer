@@ -225,7 +225,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command is None:
-        parser.print_help()
+        from .gui.app import main as gui_main
+
+        gui_main()
         return 0
     _tolerant_output()
     try:

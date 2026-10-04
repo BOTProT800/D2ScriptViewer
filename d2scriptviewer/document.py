@@ -98,13 +98,28 @@ class Document:
     def original_blob(self, position: int) -> bytes:
         return self.obsp.blob(position)
 
+    def is_modified(self, position: int) -> bool:
+        return False
+
+    def blob(self, position: int) -> bytes:
+        """Bytes actuales del objeto."""
+        return self.obsp.blob(position)
+
     def bod(self, position: int) -> bod.BodDocument:
-        """Árbol BOD del objeto, decodificado una sola vez."""
+        """Árbol BOD del objeto, decodificado una sola vez.
+
+        Se puede llamar desde un hilo de trabajo: si dos hilos decodifican a la vez
+        el mismo objeto, ``setdefault`` garantiza que todos reciben el mismo árbol,
+        que es el único que se edita.
+        """
         cached = self._bod_cache.get(position)
         if cached is None:
-            cached = bod.decode(self.obsp.blob(position))
-            self._bod_cache[position] = cached
+            cached = self._bod_cache.setdefault(position, bod.decode(self.obsp.blob(position)))
         return cached
+
+    def cached_bod(self, position: int) -> bod.BodDocument | None:
+        """El árbol si ya se decodificó; nunca decodifica."""
+        return self._bod_cache.get(position)
 
     def script_header(self, position: int) -> script.ScriptHeader:
         cached = self._script_cache.get(position)

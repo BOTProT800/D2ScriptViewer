@@ -12,9 +12,33 @@ Python 3.10 o posterior en Windows. No hace falta instalar ningún paquete.
 
 ## Uso
 
+Interfaz gráfica (o doble clic en `D2ScriptViewer.pyw`):
+
 ```powershell
-python -m d2scriptviewer --version
+python -m d2scriptviewer
 ```
+
+Abre el último archivo usado, el de `D2SV_OBSP` o el del juego. Abrir no bloquea ni modifica
+el archivo.
+
+- **Objetos** (izquierda): agrupados por carpeta del editor, ruta o tipo; filtros por tipo,
+  clase y texto.
+- **Propiedades** (centro): el árbol del objeto. Doble clic en una referencia (`→ …`) lleva a su
+  destino; Alt+← y Alt+→ recorren el historial.
+- **Detalles** (derecha): metadatos, volcado hexadecimal, referencias ("apunta a" / "usado por")
+  y símbolos de los scripts compilados.
+- **Buscar** (Ctrl+F): rutas, nombres, clases, valores (texto o número) y símbolos.
+
+Línea de órdenes:
+
+```powershell
+python -m d2scriptviewer info
+python -m d2scriptviewer list --tipo Desc --filtro death
+python -m d2scriptviewer show death/death_desc --profundidad 3
+python -m d2scriptviewer verify
+```
+
+Todas aceptan `--archivo ruta\a\scripts.obsp`.
 
 ## Tests
 

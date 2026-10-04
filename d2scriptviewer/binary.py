@@ -67,3 +67,18 @@ class ByteReader:
 
     def text(self, length: int) -> str:
         return self.read(length).decode(TEXT_ENCODING)
+
+
+_PRINTABLE = bytes(byte if 0x20 <= byte < 0x7F else 0x2E for byte in range(256))
+
+
+def hex_dump(data: bytes, base: int = 0, width: int = 16) -> str:
+    """Volcado clásico: offset (desde ``base``), bytes en hexadecimal y ASCII imprimible."""
+    lines = []
+    for offset in range(0, len(data), width):
+        chunk = data[offset:offset + width]
+        lines.append(
+            f"{base + offset:08X}  {chunk.hex(' '):<{width * 3 - 1}}  "
+            f"{chunk.translate(_PRINTABLE).decode('ascii')}"
+        )
+    return "\n".join(lines)

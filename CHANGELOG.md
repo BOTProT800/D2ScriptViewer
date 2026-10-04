@@ -22,3 +22,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   `roundtrip` (`--salida`) y `verify`, con `--archivo` o `D2SV_OBSP`.
 - Tests de oro con el archivo real (SHA reconstruido, 4 172 BOD idénticos, 3 690 cabeceras de
   script coherentes, 70 182 pares hash↔cadena) y tests sintéticos sin datos del juego.
+- Visor de solo lectura (`python -m d2scriptviewer` o `D2ScriptViewer.pyw`): árbol de objetos
+  por carpeta, ruta o tipo con filtros por tipo, clase y texto; propiedades con columnas
+  Nombre, Tipo y Valor; detalles con metadatos, hexadecimal, referencias ("apunta a" / "usado
+  por") y símbolos de los scripts; búsqueda global (Ctrl+F); doble clic en una referencia
+  para ir a su destino e historial con Alt+←/→. El trabajo pesado corre en hilos y los árboles
+  se cargan al abrirlos, así que ningún objeto tarda más de 0,25 s en mostrarse.

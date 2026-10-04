@@ -1,5 +1,24 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> Fase 2 cerrada (2026-10-03), pendiente del visto bueno del usuario (punto de control 1):
+> visor de solo lectura en `gui/` (`app.py`, `object_tree.py`, `property_view.py`, `details.py`,
+> `script_view.py`, más `search_view.py` y `theme.py`) sobre el núcleo nuevo `references.py`
+> (índice "apunta a" / "usado por" y diccionario de hashes en una sola pasada) y `search.py`
+> (búsqueda por ruta, nombre, carpeta, clase, valores, símbolos de script y, opcionalmente,
+> nombres de campo, con prefiltro sobre los bytes crudos). Se abre con `python -m
+> d2scriptviewer` o `D2ScriptViewer.pyw`. Abrir lee el archivo entero y lo cierra; indexar,
+> buscar y decodificar objetos de más de 48 KB van en hilos con `queue`; los grupos del árbol
+> de objetos y los hijos de las propiedades se cargan al abrirlos (listas de más de 500
+> elementos, en tramos). Medido con el archivo real: abrir 0,38 s, índice listo en 1,8 s
+> (3 406 referencias, 70 182 cadenas), **los 7 862 objetos mostrados uno a uno en 7,2 s: el peor
+> 0,22 s y la media 0,9 ms**; búsqueda de metadatos 0,02 s y de valores 0,2–0,7 s. Ni el
+> archivo ni su carpeta cambian (tamaño, fecha, SHA y listado comprobados por test). 74 tests.
+> **Desviaciones:** los objetos se agrupan por carpeta del editor (o tipo) **y después por el
+> directorio de la ruta**, porque 2 358 objetos no tienen carpeta y 4 075 cuelgan de `oc`;
+> la hoja muestra el último tramo de la ruta. Las preferencias (archivo, geometría,
+> agrupación) se guardan al cerrar en `%APPDATA%\D2ScriptViewer\config.json`, nunca junto al
+> `.obsp`. Doble clic sobre un `FC` navega a su destino; Alt+←/→ recorre el historial.
+>
 > Fase 1 cerrada (2026-10-03): núcleo en `binary.py`, `formats/obsp.py` (lector y escritor que
 > regenera tabla, índice y cabecera), `formats/bod.py` (árbol tipado, decodificador y codificador
 > canónico), `formats/script.py` (cabecera y símbolos), `formats/hashes.py` (diccionario global),

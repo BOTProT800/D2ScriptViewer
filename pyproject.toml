@@ -32,6 +32,9 @@ classifiers = [
 [project.scripts]
 d2scriptviewer = "d2scriptviewer.cli:main"
 
+[project.gui-scripts]
+d2scriptviewer-gui = "d2scriptviewer.gui.app:main"
+
 [tool.setuptools.dynamic]
 # Única fuente de verdad: la versión vive en el paquete, no duplicada aquí.
 version = { attr = "d2scriptviewer.__version__" }
