@@ -1,5 +1,23 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> Fase 1 cerrada (2026-10-03): núcleo en `binary.py`, `formats/obsp.py` (lector y escritor que
+> regenera tabla, índice y cabecera), `formats/bod.py` (árbol tipado, decodificador y codificador
+> canónico), `formats/script.py` (cabecera y símbolos), `formats/hashes.py` (diccionario global),
+> `document.py` (abrir y decodificar bajo demanda) y `verification.py`. CLI: `info`, `list`
+> (`--tipo --clase --filtro`), `show <ruta|nombre>` (`--profundidad`), `roundtrip` (`--salida`) y
+> `verify`; todas aceptan `--archivo`. Con el archivo real: reconstrucción con SHA `B46DD3DA…`
+> (también recodificando los 4 172 BOD), 4 172 / 4 172 BOD idénticos, 3 690 / 3 690 cabeceras de
+> script coherentes, 70 182 pares hash↔cadena sin conflictos, tablas de tipos y tags del apéndice
+> exactas y 3 406 `FC` con destino. Tiempos (Python 3.12): leer y parsear el índice 30 ms,
+> decodificar todos los BOD 1,75 s, codificarlos 0,55 s, `verify` completo 2,8 s. 53 tests
+> (9 de oro con el archivo real; los sintéticos cubren los 11 tags, los modos 0/1 de lista, el
+> modo 1 de mapa, clases nativas y de script, nombres nuevos y por referencia, nulos y `FC`).
+> **Desviaciones:** los `idObjeto` se muestran en hexadecimal (`grupo:ID`); el módulo de
+> comprobaciones se llama `verification.py` (no estaba en la sección 5); el decodificador
+> rechaza modos de lista o mapa que no aparecen en el juego en lugar de suponer su significado.
+> Hipótesis nueva, en `research/FORMATO.md`: `idObjeto` = hash del nombre en minúsculas
+> (4 835 casos comprobables, ninguno en contra).
+>
 > Fase 0 cerrada (2026-10-03): repositorio git (rama `main`), paquete `d2scriptviewer` con
 > `python -m d2scriptviewer --version` (0.1.0), `pyproject.toml` sin dependencias, LICENSE MIT,
 > cabeceras SPDX, `CREDITS.md`, `README.md`, `CHANGELOG.md`, `.gitignore` con `*.obsp`,

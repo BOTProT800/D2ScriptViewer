@@ -18,8 +18,8 @@ Exportar a JSON es secundario.
 Cuando se cierre una fase o cambie una decisión, actualízalo con una nota fechada al
 principio, como hace el plan de Darksiders2DLL.
 
-Estado al 3 de octubre de 2026: fase 0 cerrada (base del repositorio); en curso el primer
-hito (fases 0 a 4). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+Estado al 3 de octubre de 2026: fases 0 (base del repositorio) y 1 (núcleo de formato y CLI)
+cerradas; en curso el primer hito (fases 0 a 4). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -32,17 +32,33 @@ Ya existen:
 
 ```powershell
 python -m d2scriptviewer --version
+python -m d2scriptviewer info                               # huella, estado y objetos por tipo
+python -m d2scriptviewer list --tipo Desc --clase Death --filtro death
+python -m d2scriptviewer show death/death_desc --profundidad 3
+python -m d2scriptviewer roundtrip --salida build\roundtrip.obsp
+python -m d2scriptviewer verify                             # comprobaciones del apéndice A
 python -m unittest discover -s tests -v                     # todos los tests
 python -m unittest tests.<modulo>.<Clase>.<test>            # un solo test
-$env:D2SV_OBSP = 'C:\ruta\a\scripts.obsp'                   # activa los tests con el archivo real
+$env:D2SV_OBSP = 'C:\ruta\a\scripts.obsp'                   # archivo real para CLI y tests
 ```
+
+Los subcomandos leen `--archivo`, o `D2SV_OBSP`, o la ruta del juego. `roundtrip --salida` se
+niega a escribir encima de la entrada, de un archivo existente o de un `*.original.obsp`.
 
 Previstos (aún no existen):
 
 ```powershell
-python -m d2scriptviewer                                    # GUI
-python -m d2scriptviewer info|list|show|roundtrip|verify    # CLI de la fase 1
+python -m d2scriptviewer                                    # GUI (fase 2)
 ```
+
+## Mapa del código
+
+- `d2scriptviewer/formats/`: `obsp.py` (contenedor y escritor), `bod.py` (árbol, codificador
+  canónico, recorrido y presentación), `script.py` (cabecera de tipo 0), `hashes.py`.
+- `document.py`: archivo abierto con decodificación bajo demanda y caché.
+- `verification.py`: las comprobaciones completas que usa `verify`.
+- `tests/fixtures.py`: OBSP sintético con los 11 tags; `tests/support.py`: archivo real.
+- `research/FORMATO.md`: hallazgos de formato fuera del apéndice A.
 
 Solo biblioteca estándar, sin dependencias externas. La CI (Windows, Python 3.10–3.13)
 lo comprueba importando los módulos sin instalar nada. Los tests que necesitan el

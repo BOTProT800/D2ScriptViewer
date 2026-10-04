@@ -25,7 +25,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Comprobar que no hacen falta dependencias externas
-        run: python -c "import d2scriptviewer, d2scriptviewer.cli"
+        run: python -c "import d2scriptviewer, d2scriptviewer.cli, d2scriptviewer.document, d2scriptviewer.verification"
 
       - name: Versión
         run: python -m d2scriptviewer --version
