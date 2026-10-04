@@ -6,6 +6,10 @@
 El trabajo pesado (abrir, indexar referencias, decodificar objetos grandes y
 buscar) corre en hilos que hablan con la interfaz a través de ``self.messages``.
 Los hilos nunca tocan Tk: solo encolan mensajes que ``_poll_messages`` atiende.
+
+Las ediciones las valida y aplica el núcleo (``edits`` y ``Document``); la
+ventana solo recoge el texto, pide confirmación en los campos con aspecto de
+identificador y refresca las vistas con :meth:`ViewerApp._after_change`.
 """
 
 from __future__ import annotations
@@ -18,15 +22,20 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
-from .. import __version__
+from .. import __version__, edits
 from ..document import Document
-from ..errors import D2ScriptViewerError
+from ..edits import EditGroup
+from ..errors import D2ScriptViewerError, EditError
+from ..formats import bod
 from ..formats.obsp import identity_text
-from ..references import Cancelled, FileIndexes, build_indexes
+from ..references import Cancelled, FileIndexes, build_indexes, references_in
 from ..settings import find_default_obsp, load_settings, save_settings
+from ..wording import count as count_text
 from . import theme
 from .details import DetailsPanel
+from .editors import ReferencePicker
 from .object_tree import GROUP_MODES, ObjectTree
+from .pending_view import PendingChangesWindow
 from .property_view import PropertyView
 from .search_view import SearchWindow
 
@@ -40,7 +49,8 @@ class ViewerApp(tk.Tk):
         super().__init__()
         self.persist_settings = persist_settings
         self.settings = load_settings() if persist_settings else {}
-        self.title(f"{APP_NAME} {__version__} — scripts.obsp de Darksiders II Deathinitive Edition")
+        self.document: Document | None = None
+        self._update_title()
         geometry = self.settings.get("geometry")
         self.geometry(str(geometry) if isinstance(geometry, str) else "1500x900")
         self.minsize(1100, 640)
@@ -48,7 +58,6 @@ class ViewerApp(tk.Tk):
         theme.configure_styles(self)
 
         self.messages: queue.Queue[tuple[str, int, object]] = queue.Queue()
-        self.document: Document | None = None
         self.indexes: FileIndexes | None = None
         self.position: int | None = None
         self.history_back: list[int] = []
@@ -56,6 +65,11 @@ class ViewerApp(tk.Tk):
         self.index_cancel = threading.Event()
         self.tokens = {"open": 0, "index": 0, "decode": 0}
         self.search_window: SearchWindow | None = None
+        self.pending_window: PendingChangesWindow | None = None
+        #: Confirmaciones sí/no; los tests lo sustituyen para no abrir diálogos.
+        self.ask: Callable[..., bool] = lambda title, message, **options: messagebox.askyesno(
+            title, message, parent=self, **options
+        )
         #: Segundos que tardó en mostrarse el último objeto (para medir el criterio < 1 s).
         self.last_display_seconds = 0.0
         self._display_started = 0.0
@@ -64,6 +78,7 @@ class ViewerApp(tk.Tk):
         self.state_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="Abre un scripts.obsp con Archivo → Abrir (Ctrl+O)")
         self.path_var = tk.StringVar(value="")
+        self.changes_var = tk.StringVar(value="")
 
         self._build_menu()
         self._build_ui()
@@ -85,6 +100,16 @@ class ViewerApp(tk.Tk):
         self.file_menu.add_command(label="Salir", command=self._on_close)
         menubar.add_cascade(label="Archivo", menu=self.file_menu)
 
+        self.edit_menu = tk.Menu(menubar, tearoff=False)
+        self.edit_menu.add_command(label="Deshacer", accelerator="Ctrl+Z", command=self.undo, state="disabled")
+        self.edit_menu.add_command(label="Rehacer", accelerator="Ctrl+Y", command=self.redo, state="disabled")
+        self.edit_menu.add_separator()
+        self.edit_menu.add_command(label="Editar valor", accelerator="F2", command=self.property_view_edit)
+        self.edit_menu.add_command(label="Revertir objeto", command=self.revert_current_object)
+        self.edit_menu.add_separator()
+        self.edit_menu.add_command(label="Cambios pendientes…", accelerator="Ctrl+P", command=self.open_pending)
+        menubar.add_cascade(label="Editar", menu=self.edit_menu)
+
         search_menu = tk.Menu(menubar, tearoff=False)
         search_menu.add_command(label="Buscar…", accelerator="Ctrl+F", command=self.open_search)
         menubar.add_cascade(label="Buscar", menu=search_menu)
@@ -104,6 +129,25 @@ class ViewerApp(tk.Tk):
         self.bind_all("<Control-f>", lambda _event: self.open_search())
         self.bind_all("<Alt-Left>", lambda _event: self.go_back())
         self.bind_all("<Alt-Right>", lambda _event: self.go_forward())
+        for sequence, action in (
+            ("<Control-z>", self.undo),
+            ("<Control-Z>", self.undo),
+            ("<Control-y>", self.redo),
+            ("<Control-Y>", self.redo),
+            ("<Control-p>", self.open_pending),
+        ):
+            self.bind_all(sequence, self._shortcut(action))
+
+    def _shortcut(self, action: Callable[[], object]) -> Callable[[tk.Event], "str | None"]:
+        """Atajo global que respeta los campos de texto (allí Ctrl+Z es del propio campo)."""
+
+        def handler(event: tk.Event) -> str | None:
+            if isinstance(event.widget, (tk.Entry, ttk.Entry, tk.Text)) or self.property_view.editing:
+                return None
+            action()
+            return "break"
+
+        return handler
 
     def _build_ui(self) -> None:
         header = ttk.Frame(self, padding=(18, 12, 18, 8))
@@ -123,7 +167,16 @@ class ViewerApp(tk.Tk):
         group_by = self.settings.get("group_by")
         if group_by in GROUP_MODES:
             self.object_tree.group_var.set(str(group_by))
-        self.property_view = PropertyView(pane, ref_label=self.ref_label, on_follow_ref=self.follow_reference)
+        self.property_view = PropertyView(
+            pane,
+            ref_label=self.ref_label,
+            on_follow_ref=self.follow_reference,
+            on_edit_text=self.commit_text_edit,
+            on_pick_reference=self.pick_reference,
+            on_revert_property=self.revert_property,
+            hint=self.edit_hint,
+            suggest=self.suggest_names,
+        )
         self.details = DetailsPanel(pane, on_navigate=self.navigate)
         pane.add(self.object_tree, weight=3)
         pane.add(self.property_view, weight=5)
@@ -143,6 +196,8 @@ class ViewerApp(tk.Tk):
         status.pack(fill="x", side="bottom")
         self.state_label = ttk.Label(status, textvariable=self.state_var, style="Status.TLabel")
         self.state_label.pack(side="left")
+        self.changes_label = ttk.Label(status, textvariable=self.changes_var, style="Status.TLabel")
+        self.changes_label.pack(side="left", padx=(16, 0))
         ttk.Label(status, textvariable=self.status_var, style="Status.TLabel").pack(side="left", padx=(16, 0))
         ttk.Label(status, textvariable=self.path_var, style="Status.TLabel").pack(side="right")
         self.progress = ttk.Progressbar(status, mode="determinate", length=160, maximum=1)
@@ -192,7 +247,22 @@ class ViewerApp(tk.Tk):
             return Path(value)
         return None
 
+    def _confirm_discard(self, action: str) -> bool:
+        """Pide permiso para perder los cambios sin guardar; ``True`` si no hay o se aceptan."""
+        if self.document is None or not self.document.change_count:
+            return True
+        count = self.document.change_count
+        return bool(
+            self.ask(
+                APP_NAME,
+                f"Hay {count_text(count, 'cambio')} sin guardar. Si {action}, se perderán.\n\n¿Continuar de todos modos?",
+                icon="warning",
+            )
+        )
+
     def choose_file(self) -> None:
+        if not self._confirm_discard("abres otro archivo"):
+            return
         current = self.document.path if self.document and self.document.path else None
         selected = filedialog.askopenfilename(
             parent=self,
@@ -233,6 +303,9 @@ class ViewerApp(tk.Tk):
         if self.search_window is not None and self.search_window.winfo_exists():
             self.search_window.close()
         self.search_window = None
+        if self.pending_window is not None and self.pending_window.winfo_exists():
+            self.pending_window.destroy()
+        self.pending_window = None
         self.object_tree.set_document(document)
         self.property_view.show_message("", "Selecciona un objeto en el panel de la izquierda.")
         self.details.clear()
@@ -246,6 +319,7 @@ class ViewerApp(tk.Tk):
             self.path_var.set(str(document.path))
             self.settings["last_file"] = str(document.path)
         self.status_var.set("Indexando referencias y cadenas en segundo plano…")
+        self._update_change_state()
         self._start_indexing()
 
     def _update_file_state(self) -> None:
@@ -398,19 +472,195 @@ class ViewerApp(tk.Tk):
             self.property_view.show_message(title, f"No se pudo decodificar: {error}")
             self.details.show(document, info)
             return
-        self.property_view.show_bod(title, tree)
+        self.property_view.show_bod(title, tree, document.edited_paths(position))
         if path:
             self.property_view.reveal(path)
-        self.details.show(
-            document,
-            info,
-            [("BOD", f"versión {tree.version}, campo desconocido {tree.flags}"),
-             ("Nombres internos", f"{tree.declared_name_count:,} (máx. {tree.declared_max_name_length} caracteres)")],
-        )
+        self._show_details(position)
         self._finish_display()
+
+    def _show_details(self, position: int) -> None:
+        assert self.document is not None
+        document = self.document
+        info = document.objects[position]
+        extra: list[tuple[str, str]] = []
+        tree = document.cached_bod(position)
+        if tree is not None:
+            extra.append(("BOD", f"versión {tree.version}, campo desconocido {tree.flags}"))
+            extra.append(
+                ("Nombres internos",
+                 f"{tree.declared_name_count:,} al abrir (máx. {tree.declared_max_name_length} caracteres)")
+            )
+        if document.is_modified(position):
+            changed = len(document.edited_paths(position))
+            extra.append(
+                ("Estado", f"modificado: {count_text(changed, 'propiedad', 'propiedades')}, {len(document.blob(position)):,} bytes al guardar")
+            )
+        else:
+            extra.append(("Estado", "sin cambios"))
+        self.details.show(document, info, extra)
 
     def _finish_display(self) -> None:
         self.last_display_seconds = time.perf_counter() - self._display_started
+
+    # --- Edición ------------------------------------------------------------------------
+
+    def edit_hint(self, node: object, _path: tuple, text: str) -> tuple[bool, str]:
+        return edits.input_hint(node, text, self.indexes.dictionary if self.indexes else None)
+
+    def suggest_names(self, text: str) -> list[str]:
+        if self.indexes is None:
+            return []
+        return edits.suggestions(self.indexes.dictionary, text)
+
+    def property_view_edit(self) -> None:
+        self.property_view.begin_edit()
+
+    def commit_text_edit(self, node: object, path: tuple, text: str) -> str | None:
+        """Valida y aplica lo escrito en el editor; devuelve el error o ``None``."""
+        document, position = self.document, self.position
+        if document is None or position is None:
+            return "No hay ningún objeto seleccionado"
+        try:
+            state = edits.parse_state(node, text, self.indexes.dictionary if self.indexes else None)
+        except EditError as error:
+            return str(error)
+        if state == edits.get_state(node):
+            return None
+        if not self._confirm_identifier(position, path, node):
+            return None
+        try:
+            group = document.edit(position, path, state)
+        except EditError as error:
+            return str(error)
+        if group is not None:
+            self._after_change(group, reveal=False)
+        return None
+
+    def _confirm_identifier(self, position: int, path: tuple, node: object) -> bool:
+        assert self.document is not None
+        warning = edits.identifier_warning(edits.field_name(self.document.bod(position), path), node)
+        if warning is None:
+            return True
+        return bool(self.ask(APP_NAME, f"{warning}\n\n¿Aplicar el cambio de todos modos?", icon="warning"))
+
+    def pick_reference(self, node: object, path: tuple) -> None:
+        document, position = self.document, self.position
+        if document is None or position is None or not isinstance(node, bod.ExternalRef):
+            return
+        title = f"{document.objects[position].label()} · {document.property_label(position, path)}"
+        identity = ReferencePicker(self, document, node.identity, title).choose()
+        if identity is None:
+            return
+        try:
+            group = document.edit(position, path, identity)
+        except EditError as error:
+            messagebox.showerror(APP_NAME, str(error), parent=self)
+            return
+        if group is not None:
+            self._after_change(group, reveal=False)
+
+    def revert_property(self, path: tuple) -> None:
+        if self.document is None or self.position is None:
+            return
+        group = self.document.revert_property(self.position, path)
+        if group is not None:
+            self._after_change(group, reveal=False)
+
+    def revert_current_object(self) -> None:
+        if self.position is not None:
+            self.revert_object(self.position)
+
+    def revert_object(self, position: int) -> None:
+        if self.document is None:
+            return
+        group = self.document.revert_object(position)
+        if group is None:
+            self.status_var.set("Ese objeto no tiene cambios")
+            return
+        self._after_change(group, reveal=position != self.position)
+
+    def undo(self) -> None:
+        if self.document is None:
+            return
+        self.property_view.cancel_edit()
+        group = self.document.undo()
+        if group is not None:
+            self._after_change(group, reveal=True, prefix="Deshecho")
+
+    def redo(self) -> None:
+        if self.document is None:
+            return
+        self.property_view.cancel_edit()
+        group = self.document.redo()
+        if group is not None:
+            self._after_change(group, reveal=True, prefix="Rehecho")
+
+    def _after_change(self, group: EditGroup, *, reveal: bool, prefix: str = "") -> None:
+        """Pone al día todas las vistas tras editar, deshacer, rehacer o revertir."""
+        document = self.document
+        assert document is not None
+        if self.indexes is not None:
+            for position in group.positions:
+                self.indexes.references.set_object(position, references_in(position, document.bod(position)))
+        self.object_tree.set_modified(document.modified_positions)
+        first = group.edits[0]
+        if reveal and first.position != self.position:
+            self.navigate(first.position, first.path)
+        elif self.position is not None and document.cached_bod(self.position) is not None:
+            self.property_view.set_edited(document.edited_paths(self.position))
+            if reveal:
+                self.property_view.reveal(first.path)
+            self._show_details(self.position)
+        if self.pending_window is not None and self.pending_window.winfo_exists():
+            self.pending_window.refresh()
+        self._update_change_state()
+        self.status_var.set(f"{prefix}: {group.description}" if prefix else group.description)
+
+    def _update_change_state(self) -> None:
+        document = self.document
+        count = document.change_count if document else 0
+        if document is not None and count:
+            objects = len(document.modified_positions)
+            self.changes_var.set(f"● {count_text(count, 'cambio')} sin guardar en {count_text(objects, 'objeto')}")
+            self.changes_label.configure(style="StatusWarn.TLabel")
+        else:
+            self.changes_var.set("Sin cambios" if document else "")
+            self.changes_label.configure(style="Status.TLabel")
+        undo = document.undo_description if document else None
+        redo = document.redo_description if document else None
+        self.edit_menu.entryconfigure(
+            0, label=f"Deshacer: {self._short(undo)}" if undo else "Deshacer", state="normal" if undo else "disabled"
+        )
+        self.edit_menu.entryconfigure(
+            1, label=f"Rehacer: {self._short(redo)}" if redo else "Rehacer", state="normal" if redo else "disabled"
+        )
+        self._update_title()
+
+    @staticmethod
+    def _short(text: str | None, limit: int = 60) -> str:
+        text = text or ""
+        return text if len(text) <= limit else text[: limit - 1] + "…"
+
+    def _update_title(self) -> None:
+        document = self.document
+        dirty = "* " if document is not None and document.change_count else ""
+        name = f"{document.path.name} — " if document is not None and document.path is not None else ""
+        self.title(f"{dirty}{name}{APP_NAME} {__version__} — scripts.obsp de Darksiders II Deathinitive Edition")
+
+    def open_pending(self) -> None:
+        if self.document is None:
+            return
+        if self.pending_window is not None and self.pending_window.winfo_exists():
+            self.pending_window.refresh()
+            self.pending_window.lift()
+            return
+        self.pending_window = PendingChangesWindow(
+            self,
+            self.document,
+            ref_label=self.ref_label,
+            on_navigate=self.navigate,
+            on_revert_object=self.revert_object,
+        )
 
     # --- Búsqueda ------------------------------------------------------------------------
 
@@ -434,6 +684,8 @@ class ViewerApp(tk.Tk):
         )
 
     def _on_close(self) -> None:
+        if not self._confirm_discard("sales"):
+            return
         self.index_cancel.set()
         if self.persist_settings:
             self.settings["geometry"] = self.geometry()
@@ -448,6 +700,7 @@ class ViewerApp(tk.Tk):
             self._poll_id = None
         if self.search_window is not None and self.search_window.winfo_exists():
             self.search_window.close()
+        self.property_view.cancel_edit()
         self.object_tree.cancel_pending()
         super().destroy()
 

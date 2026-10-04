@@ -29,6 +29,27 @@ el archivo.
   y símbolos de los scripts compilados.
 - **Buscar** (Ctrl+F): rutas, nombres, clases, valores (texto o número) y símbolos.
 
+### Editar
+
+Doble clic, F2 o Intro sobre un valor lo editan en la propia celda: Intro confirma y Escape
+cancela. La línea bajo el árbol avisa de errores y muestra cómo quedará el valor (hexadecimal de
+un entero, redondeo de un float).
+
+- **Enteros:** decimal o `0x…` (patrón de 32 bits). **Floats:** admiten coma decimal; no se
+  aceptan NaN ni infinitos. **Bools:** true/false.
+- **Cadenas sin hash** (`'…'`): cualquier texto ASCII.
+- **Nombres** (cadenas con hash): solo los que ya aparecen en el archivo, con autocompletado.
+  Crear nombres nuevos exige conocer la función de hash del juego, que aún no se ha
+  identificado.
+- **Referencias** (`→ …`): F2 abre un selector de objetos; el doble clic sigue llevando al
+  destino.
+- Ctrl+Z / Ctrl+Y deshacen y rehacen; el menú Editar y el clic derecho permiten revertir una
+  propiedad o el objeto entero; Ctrl+P abre los cambios pendientes.
+- Los campos con aspecto de identificador (`…ID`, enteros enormes con pinta de hash) piden
+  confirmación antes de cambiar.
+
+Los objetos de script compilado son de solo lectura.
+
 Línea de órdenes:
 
 ```powershell

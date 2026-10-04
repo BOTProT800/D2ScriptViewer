@@ -21,6 +21,7 @@ class HashDictionary:
     def __init__(self) -> None:
         self._texts: dict[int, str] = {}
         self._hashes: dict[str, int] | None = None
+        self._sorted: list[str] | None = None
         #: (hash, texto ya conocido, texto nuevo) cuando un hash aparece con dos textos.
         self.conflicts: list[tuple[int, str, str]] = []
 
@@ -35,6 +36,7 @@ class HashDictionary:
         if known is None:
             self._texts[value_hash] = text
             self._hashes = None
+            self._sorted = None
         elif known != text:
             self.conflicts.append((value_hash, known, text))
 
@@ -58,7 +60,10 @@ class HashDictionary:
         return None if value_hash is None else Name(value_hash, text)
 
     def texts(self) -> list[str]:
-        return sorted(self._texts.values(), key=str.casefold)
+        """Todas las cadenas conocidas, en orden alfabético sin distinguir mayúsculas (en caché)."""
+        if self._sorted is None:
+            self._sorted = sorted(self._texts.values(), key=str.casefold)
+        return self._sorted
 
     def pairs(self) -> Iterator[tuple[int, str]]:
         return iter(self._texts.items())

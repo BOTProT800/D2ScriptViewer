@@ -18,9 +18,9 @@ Exportar a JSON es secundario.
 Cuando se cierre una fase o cambie una decisión, actualízalo con una nota fechada al
 principio, como hace el plan de Darksiders2DLL.
 
-Estado al 3 de octubre de 2026: fases 0 (base del repositorio), 1 (núcleo de formato y CLI)
-y 2 (visor de solo lectura) cerradas; la fase 3 espera el visto bueno del usuario al visor
-(punto de control 1). En curso el primer hito (fases 0 a 4). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+Estado al 4 de octubre de 2026: fases 0 (base del repositorio), 1 (núcleo de formato y CLI),
+2 (visor de solo lectura, con visto bueno del usuario) y 3 (edición de valores) cerradas. En
+curso la fase 4 (guardado y copia del original), que cierra el primer hito. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -55,11 +55,18 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   canónico, recorrido y presentación), `script.py` (cabecera de tipo 0), `hashes.py`.
 - `document.py`: archivo abierto con decodificación bajo demanda y caché (`bod()` es seguro
   entre hilos: todos reciben el mismo árbol).
+- `edits.py`: validación del texto del usuario por tipo, avisos de identificador y comandos
+  (`ValueEdit`, `EditGroup`). Una edición cambia el *estado* de una hoja, nunca su tipo.
+  `Document.edit()` / `undo()` / `redo()` / `revert_*()` llevan el registro; un objeto está
+  modificado mientras alguna propiedad difiera de su original.
 - `references.py` (índice `FC` y diccionario en una pasada) y `search.py` (búsqueda en hilo).
+- `wording.py`: plurales («1 objeto», «2 objetos»).
 - `verification.py`: las comprobaciones completas que usa `verify`.
-- `gui/`: `app.py` (ventana, hilos, navegación), `object_tree.py`, `property_view.py`,
-  `details.py`, `script_view.py`, `search_view.py`, `theme.py`. Los hilos solo encolan
-  mensajes; `_poll_messages` los atiende en el hilo de Tk.
+- `gui/`: `app.py` (ventana, hilos, navegación, edición), `object_tree.py`, `property_view.py`,
+  `editors.py` (editor en la celda y selector de referencias), `pending_view.py`, `details.py`,
+  `script_view.py`, `search_view.py`, `theme.py`. Los hilos solo encolan mensajes;
+  `_poll_messages` los atiende en el hilo de Tk. Las confirmaciones pasan por `app.ask`, que
+  los tests sustituyen.
 - `tests/fixtures.py`: OBSP sintético con los 11 tags; `tests/support.py`: archivo real;
   `tests/test_gui.py`: humo de la GUI (se omite sin Tk).
 - `research/FORMATO.md`: hallazgos de formato fuera del apéndice A.

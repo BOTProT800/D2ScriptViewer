@@ -24,6 +24,7 @@ from typing import Iterator, NamedTuple, Union
 
 from ..binary import F32, I32, TEXT_ENCODING, U16, U32
 from ..errors import FormatError
+from ..wording import count
 
 MAGIC = b"BOD\xfd"
 HEADER = struct.Struct("<4sHHII")
@@ -622,7 +623,7 @@ def value_text(value: object) -> str:
     if isinstance(value, BodObject):
         return value.cls.label()
     if isinstance(value, (BodList, BodMap, BodTuple)):
-        return f"{len(value.items)} elementos"
+        return count(len(value.items), "elemento")
     if isinstance(value, Pair):
         return f"{value_text(value.key)} → {value_text(value.value)}"
     return ""

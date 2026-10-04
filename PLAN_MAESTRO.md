@@ -1,6 +1,28 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
-> Fase 2 cerrada (2026-10-03), pendiente del visto bueno del usuario (punto de control 1):
+> Fase 3 cerrada (2026-10-04): edición de valores. Núcleo en `edits.py` (validación y comandos)
+> y `document.py` (seguimiento de cambios, deshacer/rehacer, revertir propiedad u objeto,
+> cambios pendientes y `current_data()`, el archivo tal como se guardaría). Editores: `02`
+> (decimal o `0x…` como patrón de 32 bits, rango int32, pista con hexadecimal), `03` (admite
+> coma decimal; rechaza NaN, infinitos y desbordamientos; la pista muestra el valor redondeado a
+> float32), `04` (true/false), `05` (ASCII, sin NUL, ≤ 65 535), `0F` (solo cadenas ya presentes,
+> con autocompletado entre las 70 182 y distinción de mayúsculas) y `FC` (selector de objetos;
+> el destino debe existir). Edición en la celda con doble clic, F2 o Intro; menú contextual;
+> Ctrl+Z / Ctrl+Y; Ctrl+P abre «Cambios pendientes» (antes → después por objeto); marcas en el
+> árbol, en las propiedades, en el título y en la barra de estado; confirmación al salir o abrir
+> otro archivo con cambios. Los campos con aspecto de identificador (`ID`, `*ID`, `*Id`,
+> `*Hash*` o enteros con |valor| ≥ 1 000 000) muestran un aviso y piden confirmación. Un objeto
+> está modificado mientras alguna propiedad difiera de su original: volver al valor de partida,
+> a mano o deshaciendo, devuelve sus bytes originales. Criterios comprobados por test, también
+> con el archivo real: cada edición cambia solo su blob (el float de `PanicHitTime` en
+> `death/death_desc`: un blob distinto, mismo tamaño; una cadena `05` alargada 5 bytes: solo
+> ese blob cambia y los offsets posteriores se desplazan 5), editar un `0F` y un `FC` y deshacer
+> devuelve el SHA `B46DD3DA…`, y el resto de floats conserva sus bytes crudos (incluido un NaN
+> con carga útil propia). 103 tests. **Desviaciones:** el `FC` se edita con un diálogo (F2), no
+> en la celda, porque el doble clic sobre una referencia sigue navegando a su destino; el
+> umbral de «parece un hash» (1 000 000) es una heurística propia.
+>
+> Fase 2 cerrada (2026-10-03), con visto bueno del usuario el 2026-10-04 (punto de control 1):
 > visor de solo lectura en `gui/` (`app.py`, `object_tree.py`, `property_view.py`, `details.py`,
 > `script_view.py`, más `search_view.py` y `theme.py`) sobre el núcleo nuevo `references.py`
 > (índice "apunta a" / "usado por" y diccionario de hashes en una sola pasada) y `search.py`

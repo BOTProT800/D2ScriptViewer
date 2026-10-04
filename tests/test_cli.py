@@ -40,7 +40,7 @@ class CliTests(TempDirMixin, unittest.TestCase):
         code, out, err = run("list", "--archivo", str(self.file), "--tipo", "Desc")
         self.assertEqual(code, 0)
         self.assertIn("death/death_desc", out)
-        self.assertIn("1 objetos", err)
+        self.assertEqual(err.strip(), "1 objeto")
         _code, out, _err = run("list", "--archivo", str(self.file), "--clase", "weapon")
         self.assertIn("scripts/weaponbehavior_inst", out)
         _code, out, _err = run("list", "--archivo", str(self.file), "--filtro", "oc/body")

@@ -129,6 +129,146 @@ class ViewerSmokeTests(unittest.TestCase):
 
 
 @requires_tk
+class EditingGuiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from d2scriptviewer.gui.app import ViewerApp
+
+        self.app = ViewerApp(auto_open=False, persist_settings=False)
+        self.app.withdraw()
+        self.addCleanup(self.app.destroy)
+        self.questions: list[str] = []
+        self.answer = True
+
+        def ask(_title: str, message: str, **_options: object) -> bool:
+            self.questions.append(message)
+            return self.answer
+
+        self.app.ask = ask
+        self.document = Document.from_bytes(fixtures.make_obsp())
+        self.app.set_document(self.document)
+        self.assertTrue(pump(self.app, lambda: self.app.indexes is not None))
+        self.desc = self.document.find("death/death_desc")[0].position
+        self.app.navigate(self.desc)
+        self.view = self.app.property_view
+
+    def row(self, label: str) -> str:
+        tree = self.document.bod(self.desc)
+        path = next(path for path, _node in bod.walk(tree.root) if bod.path_label(tree, path) == label)
+        self.view.reveal(path)
+        return self.view._iid_by_path[path]
+
+    def type_into_editor(self, label: str, text: str) -> None:
+        self.row(label)
+        self.view.begin_edit()
+        self.assertTrue(self.view.editing)
+        self.view.editor.var.set(text)
+        self.view.editor.commit()
+
+    def test_inline_edit_marks_and_undo_restores(self) -> None:
+        self.type_into_editor("Health", "250")
+        iid = self.row("Health")
+        self.assertFalse(self.view.editing)
+        self.assertEqual(self.view.tree.item(iid, "values"), ("int32", "250"))
+        self.assertIn("edited", self.view.tree.item(iid, "tags"))
+        objects = self.app.object_tree.tree
+        self.assertTrue(objects.item(f"o{self.desc}", "text").startswith("● "))
+        self.assertIn("1 cambio sin guardar", self.app.changes_var.get())
+        self.assertTrue(self.app.title().startswith("* "))
+        self.assertIn("Health", self.app.edit_menu.entrycget(0, "label"))
+
+        self.app.undo()
+        self.assertEqual(self.view.tree.item(iid, "values"), ("int32", "100"))
+        self.assertNotIn("edited", self.view.tree.item(iid, "tags"))
+        self.assertFalse(objects.item(f"o{self.desc}", "text").startswith("● "))
+        self.assertEqual(self.app.changes_var.get(), "Sin cambios")
+        self.assertEqual(self.document.current_data(), fixtures.make_obsp())
+        self.app.redo()
+        self.assertEqual(self.view.tree.item(iid, "values"), ("int32", "250"))
+
+    def test_invalid_input_keeps_the_editor_open(self) -> None:
+        self.type_into_editor("Health", "muchos")
+        self.assertTrue(self.view.editing)
+        self.assertIn("no es un número entero", self.view.hint_var.get())
+        self.view.cancel_edit()
+        self.assertEqual(self.document.change_count, 0)
+
+    def test_bool_and_known_name_editors(self) -> None:
+        self.type_into_editor("Visible", "false")
+        self.assertEqual(self.view.tree.item(self.row("Visible"), "values"), ("bool", "false"))
+        self.row("Mesh")
+        self.view.begin_edit()
+        self.assertIn("death_mesh", self.view.editor.widget.cget("values"))
+        self.view.editor.var.set("fi")
+        self.assertIn("fire", self.view.editor.widget.cget("values"))
+        self.view.editor.var.set("fire")
+        self.view.editor.commit()
+        self.assertEqual(self.view.tree.item(self.row("Mesh"), "values"), ("nombre", "fire"))
+        self.type_into_editor("Mesh", "Fire")  # distingue mayúsculas: no existe
+        self.assertTrue(self.view.editing)
+        self.view.cancel_edit()
+
+    def test_identifier_fields_ask_first(self) -> None:
+        self.answer = False
+        self.type_into_editor("ItemID", "99")
+        self.assertEqual(len(self.questions), 1)
+        self.assertIn("ItemID", self.questions[0])
+        self.assertEqual(self.document.change_count, 0)
+        self.answer = True
+        self.type_into_editor("ItemID", "99")
+        self.assertEqual(self.document.change_count, 1)
+
+    def test_reference_picker(self) -> None:
+        from d2scriptviewer.gui import app as app_module
+        from d2scriptviewer.gui.editors import ReferencePicker
+
+        picker = ReferencePicker(self.app, self.document, (fixtures.SCRIPT_GROUP, fixtures.INSTANCE_ID), "prueba")
+        picker.filter_var.set("char_test")
+        picker.refresh()
+        picker.accept()
+        self.assertEqual(picker.result, (fixtures.GROUP, fixtures.TABLE_ID))
+
+        class FakePicker:
+            def __init__(self, *_args: object) -> None:
+                pass
+
+            def choose(self) -> tuple[int, int]:
+                return (fixtures.GROUP, fixtures.TABLE_ID)
+
+        original = app_module.ReferencePicker
+        app_module.ReferencePicker = FakePicker
+        try:
+            self.row("Behavior")
+            self.view.begin_edit()
+        finally:
+            app_module.ReferencePicker = original
+        self.assertIn("base/char_test", self.view.tree.item(self.row("Behavior"), "values")[1])
+        outgoing = [self.app.details.refs_out.item(iid, "values") for iid in self.app.details.refs_out.get_children()]
+        self.assertEqual(outgoing, [("Behavior", "base/char_test")])
+
+    def test_pending_window_and_revert(self) -> None:
+        self.type_into_editor("Health", "5")
+        self.type_into_editor("Speed", "3")
+        self.app.open_pending()
+        window = self.app.pending_window
+        rows = [window.tree.item(iid, "values") for parent in window.tree.get_children()
+                for iid in window.tree.get_children(parent)]
+        self.assertEqual(rows, [("Health", "int32", "100", "5"), ("Speed", "float32", "1.5", "3")])
+        window.tree.selection_set(window.tree.get_children()[0])
+        window._revert()
+        self.assertEqual(window.tree.get_children(), ())
+        self.assertEqual(self.document.change_count, 0)
+        self.app.undo()
+        self.assertEqual(self.document.change_count, 2)
+
+    def test_closing_with_changes_asks(self) -> None:
+        self.type_into_editor("Health", "5")
+        self.answer = False
+        self.app._on_close()
+        self.assertTrue(self.app.winfo_exists())
+        self.assertIn("1 cambio sin guardar", self.questions[-1])
+
+
+@requires_tk
 @requires_real_file
 class RealViewerTests(unittest.TestCase):
     def test_large_objects_display_fast_and_nothing_is_written(self) -> None:

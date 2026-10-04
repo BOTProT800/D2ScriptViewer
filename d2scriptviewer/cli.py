@@ -17,6 +17,7 @@ from .formats import bod
 from .formats.obsp import KIND_NAMES, STEAM_ORIGINAL_SHA256, identity_text, kind_name, rebuild
 from .settings import OBSP_ENV, find_default_obsp
 from .verification import verify_data
+from .wording import count
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -123,7 +124,7 @@ def command_list(document: Document, args: argparse.Namespace) -> int:
             f"{identity:22}  {info.kind_label:24} {info.entry.size:>8,}  {info.path}  "
             f"[{info.class_name or '-'}] {info.folder}"
         )
-    print(f"{shown:,} objetos", file=sys.stderr)
+    print(count(shown, "objeto"), file=sys.stderr)
     return 0
 
 

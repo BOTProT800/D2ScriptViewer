@@ -28,3 +28,10 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   por") y símbolos de los scripts; búsqueda global (Ctrl+F); doble clic en una referencia
   para ir a su destino e historial con Alt+←/→. El trabajo pesado corre en hilos y los árboles
   se cargan al abrirlos, así que ningún objeto tarda más de 0,25 s en mostrarse.
+- Edición de valores en el visor: enteros, floats, bools, cadenas sin hash, cadenas ya
+  presentes en el archivo (con autocompletado) y referencias (con un selector de objetos).
+  Doble clic, F2 o Intro editan en la celda con validación y una pista en vivo (hexadecimal,
+  redondeo a float32, hash de la cadena); deshacer y rehacer (Ctrl+Z / Ctrl+Y); revertir una
+  propiedad o un objeto; ventana «Cambios pendientes» (Ctrl+P) con antes → después; marcas de
+  modificado en el árbol, las propiedades, el título y la barra de estado; aviso y
+  confirmación al editar campos con aspecto de identificador o de hash.

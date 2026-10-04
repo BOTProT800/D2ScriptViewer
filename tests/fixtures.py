@@ -100,6 +100,8 @@ def desc_document() -> BodDocument:
             ),
             F("Empty", BodList(bod.MODE_VALUES, [])),
             F("Label", RawString("")),
+            # Con aspecto de identificador: la edición pide confirmación.
+            F("ItemID", Int32.of(1234)),
         ],
     )
     return BodDocument(4, 1, root)
