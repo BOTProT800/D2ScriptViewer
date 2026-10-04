@@ -228,3 +228,61 @@ herramienta, y la usa para encontrar un recurso de fuera del archivo: una animac
 trae pero que nada nombraba. También carga las animaciones del paquete que ningún
 `AnimationDesc` nombra. Esta prueba no distingue si el juego busca el recurso por el hash o por
 el texto; la función ya estaba comprobada con los 70 182 pares.
+
+## Fase 7 — parche de un literal de script (2026-10-04)
+
+Comprueba que el juego carga un script compilado con un literal parcheado (mismo tamaño) y que
+el cambio tiene efecto. La edición se eligió con el desensamblador entre los literales con efecto
+visible que no se guardan en la partida.
+
+### Edición elegida
+
+- **Objeto:** `ui_core/pausemenu` (script, 15 771 bytes): el menú de pausa.
+- **Código:** en `onInit`, la línea 38 del fuente es `Game.setPaused(true)`: `bool true` en
+  `0x004E`, `args 1`, `op_2C Game` y `método setPaused`. Al cerrarse, `onDeInit` llama a
+  `Game.setPaused(false)` (línea 88).
+- **Cambio:** `Funciones.onInit.0x004E` `true` → `false`.
+- **En el ensayo**, sobre una copia en una carpeta temporal: cambia un solo byte del blob
+  (`0x668`: 1 → 0); el archivo sigue midiendo 18 334 463 bytes; el SHA del archivo guardado
+  empieza por `69A486B63E9A66AB`; `verify` da correcto; releer muestra `false`; restaurar devuelve
+  `B46DD3DA…`.
+- **Efecto esperado:** al abrir el menú de pausa, el juego no se detiene detrás: el mundo, los
+  enemigos y las animaciones de Death siguen moviéndose. Al cerrarlo, todo sigue con normalidad.
+  **Hipótesis:**
+  - que el argumento de `setPaused` decida si se pausa se deduce de su nombre;
+  - justo después, `NPC.onPause()` (línea 39) se sigue llamando, así que los NPC podrían
+    detenerse aunque el resto no;
+  - si el motor pausa también por otra vía, puede que no se note nada, y ese resultado también
+    vale.
+- **Estado de la instalación antes de la prueba** (leído en solo lectura): `scripts.obsp`
+  original de Steam (`B46DD3DA…`, 16:41:24), `scripts.original.obsp` intacto (03:42:21) y 5
+  copias rotativas, la última de las 16:41:24.
+
+### Resultado (2026-10-04)
+
+El usuario hizo la prueba con la herramienta sobre el archivo instalado e informó de que
+«funcionó»:
+
+- con el menú de pausa abierto, el juego sigue corriendo en tiempo real detrás;
+- al intentar moverse entre las opciones del menú, se mueve el personaje y no la selección del
+  menú. **Hipótesis:** la pausa también desvía la entrada del mando o el teclado hacia la
+  interfaz; sin ella, la entrada sigue llegando al juego.
+
+**Evidencia en la instalación**, leída después del informe y solo para leer:
+
+- **17:31:53, guardado.** La copia rotativa `scripts.20261004-173153-100425.obsp` es el original
+  de Steam (`B46DD3DA…`), la versión previa.
+- **17:33:22, restauración** (hecha por el usuario). La copia rotativa
+  `scripts.20261004-173322-960549.obsp` (18 334 463 bytes, SHA `69A486B63E9A66AB…`) es la versión
+  que se jugó y coincide byte a byte con el ensayo: un solo byte cambiado, el literal de
+  `Game.setPaused`.
+- **Archivo instalado:** 18 334 463 bytes, SHA `B46DD3DA…`, original de Steam.
+- **`scripts.original.obsp`:** sin cambios desde su creación (03:42:21, `B46DD3DA…`).
+- **Copias rotativas:** quedan las últimas 5; la poda borró las de las 03:55:46 y 15:17:54.
+
+### Conclusión
+
+El juego carga un script compilado con un literal parcheado por la herramienta (mismo tamaño,
+estructura intacta) y ejecuta el valor nuevo: la interpretación del bytecode de la fase 7 es
+correcta al menos para ese literal y su llamada. Parchear literales de scripts sin cambiar
+tamaños es viable.

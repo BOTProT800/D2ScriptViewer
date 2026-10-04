@@ -1,5 +1,30 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 7 cerrada (2026-10-04)** con la prueba en el juego (detalle en
+> `research/PRUEBAS_EN_JUEGO.md`). El usuario cambió en `ui_core/pausemenu` el literal de
+> `Game.setPaused(true)` (`Funciones.onInit.0x004E`) a `false`. Informó de que, con el menú de
+> pausa abierto, el juego sigue en tiempo real, y de que las flechas mueven al personaje en vez de
+> la selección del menú. La versión jugada (SHA `69A486B6…`, un solo byte cambiado) coincide con
+> el ensayo, y el usuario restauró `B46DD3DA…`.
+>
+> Criterios de «Hecho cuando»:
+>
+> 1. Los 3 690 scripts se interpretan enteros y se reserializan idénticos: sí.
+> 2. Las 9 721 funciones se desensamblan justo hasta su tamaño, sin opcodes desconocidos, y los
+>    111 603 nombres en línea llevan su hash; la tabla de 57 opcodes con sus recuentos está en
+>    el apéndice A.3: sí.
+> 3. El panel central muestra miembros y funciones desensambladas, y existe `disasm`. Los
+>    scripts de más de 48 KB se decodifican en un hilo. Medido: los 3 690 se muestran uno a uno
+>    con una media de 2,3 ms y 0,27 s el peor: sí.
+> 4. Parches del mismo tamaño de literales y valores, con deshacer y cambios pendientes; al
+>    guardar se comprueba que solo cambiaron esos valores: sí.
+> 5. Tests sintéticos (script generado por el serializador) y con el archivo real: sí.
+> 6. El juego carga el parche y refleja su efecto; restaurar devuelve `B46DD3DA…`: sí.
+> 7. Apéndice A.3, `research/FORMATO.md`, `CLAUDE.md` y `CHANGELOG.md`: sí.
+>
+> 188 tests. Siguiente paso: la fase 8 (exportación y parches), empezando por analizar los
+> datos y acordar con el usuario el formato del parche.
+>
 > **Decisiones de la fase 7 (2026-10-04)**, confirmadas por el usuario a partir de un primer
 > análisis de los 3 690 scripts. Detrás de la cabecera, el cuerpo empieza por el hash del nombre
 > corto (= símbolo 1) y el de la clase base (= símbolo 2) en los 3 690. Le siguen una tabla de

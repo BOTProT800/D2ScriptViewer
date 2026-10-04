@@ -18,6 +18,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   marcas y cambios pendientes. Al guardar se comprueba que solo cambiaron esos valores.
 - `python -m d2scriptviewer disasm <script>`, y `verify` comprueba también el cuerpo y el
   bytecode de los scripts y los hashes de los 111 603 nombres en línea.
+- Prueba en el juego de un parche de script (`research/PRUEBAS_EN_JUEGO.md`): con el literal de
+  `Game.setPaused` del menú de pausa a `false`, el juego sigue corriendo con el menú abierto.
 - Función de hash de 64 bits del juego (fase 6): un CRC-64 reflejado con polinomio
   `0x0060034000F0D50B`, deducido de los 70 182 pares del archivo y comprobado en todos ellos.
   `idObjeto` es el hash del nombre en minúsculas en los 7 862 objetos.
