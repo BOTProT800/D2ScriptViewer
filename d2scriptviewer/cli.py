@@ -13,7 +13,7 @@ from pathlib import Path
 from . import __version__
 from .document import Document, ObjectInfo
 from .errors import D2ScriptViewerError
-from .formats import bod
+from .formats import bod, script
 from .formats.hashes import name_hash, object_id
 from .formats.obsp import KIND_NAMES, STEAM_ORIGINAL_SHA256, identity_text, kind_name, rebuild
 from .settings import OBSP_ENV, find_default_obsp
@@ -49,6 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     show = add_command("show", "mostrar un objeto como árbol de texto")
     show.add_argument("objeto", help="ruta (p. ej. death/death_desc) o nombre (p. ej. Death_Desc)")
     show.add_argument("--profundidad", type=int, default=0, help="profundidad máxima (0 = sin límite)")
+
+    disasm = add_command("disasm", "desensamblar un script compilado (tipo 0)")
+    disasm.add_argument("objeto", help="ruta (p. ej. death/death) o nombre del script")
 
     roundtrip = add_command("roundtrip", "recodificar todos los BOD, reconstruir y comparar")
     roundtrip.add_argument("--salida", type=Path, help="escribir aquí el archivo reconstruido")
@@ -160,7 +163,7 @@ def _print_object(document: Document, info: ObjectInfo, limit: int) -> None:
     if info.is_script:
         header = document.script_header(info.position)
         print(f"script versión {header.version}, {len(header.symbols)} símbolos, "
-              f"cuerpo de {entry.size - header.body_offset:,} bytes (solo lectura)")
+              f"cuerpo de {entry.size - header.body_offset:,} bytes (desensamblado: subcomando disasm)")
         for symbol in header.symbols:
             print(f"  {symbol.hash:016X}  {symbol.text}")
         return
@@ -169,16 +172,36 @@ def _print_object(document: Document, info: ObjectInfo, limit: int) -> None:
     _print_tree(document, "raíz", parsed.root, 0, limit)
 
 
-def command_show(document: Document, args: argparse.Namespace) -> int:
-    matches = document.find(args.objeto)
+def _single_match(document: Document, query: str) -> ObjectInfo | None:
+    matches = document.find(query)
     if not matches:
-        raise D2ScriptViewerError(f"Ningún objeto coincide con '{args.objeto}'")
+        raise D2ScriptViewerError(f"Ningún objeto coincide con '{query}'")
     if len(matches) > 1:
         print(f"{len(matches)} objetos coinciden; sé más preciso:", file=sys.stderr)
         for info in matches[:50]:
             print(f"  {info.path}  ({info.name}, {info.kind_label})", file=sys.stderr)
+        return None
+    return matches[0]
+
+
+def command_disasm(document: Document, args: argparse.Namespace) -> int:
+    info = _single_match(document, args.objeto)
+    if info is None:
         return 1
-    _print_object(document, matches[0], args.profundidad)
+    if not info.is_script:
+        raise D2ScriptViewerError(f"{info.path} no es un script compilado (es {info.kind_label})")
+    print(f"# {info.path}  ({info.name}), id {identity_text(info.entry.group, info.entry.object_id)}, "
+          f"{info.entry.size:,} bytes")
+    for line in script.disassembly_lines(document.script(info.position)):
+        print(line)
+    return 0
+
+
+def command_show(document: Document, args: argparse.Namespace) -> int:
+    info = _single_match(document, args.objeto)
+    if info is None:
+        return 1
+    _print_object(document, info, args.profundidad)
     return 0
 
 
@@ -263,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
             return command_list(document, args)
         if args.command == "show":
             return command_show(document, args)
+        if args.command == "disasm":
+            return command_disasm(document, args)
         if args.command == "roundtrip":
             return command_roundtrip(document, path, args.salida)
         parser.error(f"subcomando desconocido: {args.command}")

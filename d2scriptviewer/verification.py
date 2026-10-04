@@ -16,7 +16,7 @@ from typing import Callable
 
 from .errors import FormatError
 from .formats import bod, script
-from .formats.hashes import HashDictionary, document_names, object_id
+from .formats.hashes import HashDictionary, document_names, name_hash, object_id
 from .formats.obsp import STEAM_ORIGINAL_SHA256, ObspFile, identity_text, rebuild, string_table_order
 
 Progress = Callable[[int, int], None]
@@ -80,6 +80,7 @@ def verify_data(data: bytes, progress: Progress | None = None) -> VerifyReport:
     recoded: dict[int, bytes] = {}
     bod_total = bod_same = bod_failed = 0
     script_total = script_bad = 0
+    body_same = inline_names = inline_wrong = 0
     references: list[tuple[int, int]] = []
     first_failures: list[str] = []
     total = len(entries)
@@ -101,6 +102,18 @@ def verify_data(data: bytes, progress: Progress | None = None) -> VerifyReport:
             for symbol in header.symbols:
                 dictionary.add(symbol.hash, symbol.text)
                 non_ascii += not symbol.text.isascii()
+            try:
+                parsed = script.parse(blob)
+            except FormatError as error:
+                first_failures.append(f"{label}: {error}")
+                continue
+            if script.encode(parsed) == blob:
+                body_same += 1
+            else:
+                first_failures.append(f"{label}: el script reserializado difiere")
+            for name in script.all_names(parsed):
+                inline_names += 1
+                inline_wrong += name_hash(name.text) != name.hash
         else:
             bod_total += 1
             try:
@@ -136,6 +149,11 @@ def verify_data(data: bytes, progress: Progress | None = None) -> VerifyReport:
         script_bad == 0,
         f"{script_total - script_bad:,} / {script_total:,} coherentes",
     )
+    report.add(
+        "Scripts: cuerpo y bytecode",
+        body_same == script_total,
+        f"{body_same:,} / {script_total:,} se interpretan, desensamblan y reserializan idénticos",
+    )
     rebuilt = rebuild(obsp, recoded)
     report.add(
         "Reconstrucción completa (BOD recodificados)",
@@ -154,6 +172,11 @@ def verify_data(data: bytes, progress: Progress | None = None) -> VerifyReport:
         not mismatches,
         f"{len(dictionary) - len(mismatches):,} / {len(dictionary):,} pares"
         + "".join(f"; no cuadra: {value_hash:016X} «{text[:40]}»" for value_hash, text in mismatches[:3]),
+    )
+    report.add(
+        "Nombres en línea del bytecode",
+        inline_wrong == 0,
+        f"{inline_names - inline_wrong:,} / {inline_names:,} con el hash de su texto",
     )
     named = [(entry, obsp.text(entry.name_hash)) for entry in entries]
     named = [(entry, name) for entry, name in named if name is not None]

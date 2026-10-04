@@ -19,7 +19,7 @@ from tkinter import ttk
 from typing import Callable
 
 from .. import edits
-from ..formats import bod
+from ..formats import bod, script
 from . import theme
 from .editors import InlineEditor
 
@@ -144,7 +144,11 @@ class PropertyView(ttk.Frame):
         self.edited_paths = set(edited_paths or ())
         self._insert_children("", document.root, ())
         self._populated.add("")
-        self.set_hint("Doble clic o F2 para editar un valor · clic derecho para más opciones")
+        if isinstance(document, script.ScriptTree):
+            self.set_hint("Script compilado: doble clic o F2 edita los literales int, float y bool y los valores "
+                          "de esos tipos; lo demás es de solo lectura")
+        else:
+            self.set_hint("Doble clic o F2 para editar un valor · clic derecho para más opciones")
 
     def set_edited(self, paths: set[tuple]) -> None:
         self.edited_paths = set(paths)
@@ -303,6 +307,9 @@ class PropertyView(ttk.Frame):
         elif isinstance(node, bod.HashedString):
             self.set_hint("F2 o doble clic para cambiar la cadena: sugiere las del archivo y admite nuevas"
                           " (distingue mayúsculas)" + structure)
+        elif isinstance(node, bod.Note):
+            self.set_hint("Solo lectura: en los scripts solo se editan los literales int, float y bool y los "
+                          "valores de esos tipos, sin cambiar tamaños")
         elif edits.is_editable(node):
             self.set_hint("Doble clic o F2 para editar" + structure)
         elif structure:
@@ -354,6 +361,10 @@ class PropertyView(ttk.Frame):
         if selected is None or self.document is None or self.on_edit_text is None:
             return
         node, path = selected
+        if isinstance(self.document, script.ScriptTree) and not isinstance(node, script.EDITABLE_VALUES):
+            self.set_hint("Solo lectura: en los scripts solo se editan los literales int, float y bool y los "
+                          "valores de esos tipos, sin cambiar tamaños", "warn")
+            return
         if not edits.is_editable(node):
             self.set_hint("Este valor no se edita escribiendo: usa el clic derecho para las operaciones de estructura",
                           "warn")
@@ -420,7 +431,7 @@ class PropertyView(ttk.Frame):
 
     def structure_actions(self, node: object, path: tuple) -> list[str]:
         """Acciones estructurales que admite la fila (decisiones de la fase 5)."""
-        if self.document is None or self.on_structure is None:
+        if self.document is None or self.on_structure is None or isinstance(self.document, script.ScriptTree):
             return []
         actions = []
         found = edits.structural_parent(self.document, path)

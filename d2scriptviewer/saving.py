@@ -11,7 +11,8 @@ Secuencia de :func:`execute_save`:
 2. **Autoverificar**: se vuelve a parsear el resultado y se comprueba que tiene los
    mismos objetos e identidades, que los blobs no modificados son idénticos, que
    los modificados decodifican al árbol editado y que los hashes de la tabla de
-   cadenas y de los objetos modificados son los de sus textos.
+   cadenas y de los objetos modificados son los de sus textos. De un script
+   modificado se comprueba que solo cambiaron sus literales y valores editables.
 3. **Comprobar que el destino se puede escribir** (juego abierto, solo lectura, permisos).
 4. **Copia del original**: si no existe ``X.original.obsp``, se copia el archivo tal
    como está en disco, se verifica su SHA-256 y se marca de solo lectura. Si ya
@@ -37,7 +38,7 @@ from typing import Callable
 
 from .document import Document
 from .errors import D2ScriptViewerError, FormatError, SaveError
-from .formats import bod
+from .formats import bod, script
 from .formats.hashes import document_names, first_wrong_name, name_hash
 from .formats.obsp import STEAM_ORIGINAL_SHA256, ObspFile
 from .validation import validate
@@ -183,6 +184,9 @@ def verify_plan(plan: SavePlan) -> None:
             continue
         if blob != expected:
             raise SaveError(f"El objeto {position} no contiene el árbol editado")
+        if new.is_script:
+            _verify_script(position, source.blob(position), blob)
+            continue
         try:
             tree = bod.decode(blob)
             if bod.encode(tree) != blob:
@@ -203,6 +207,17 @@ def verify_plan(plan: SavePlan) -> None:
             raise SaveError(
                 f"La tabla de cadenas tiene «{text[:60]}» con un hash que no le corresponde ({value_hash:016X})"
             )
+
+
+def _verify_script(position: int, original: bytes, blob: bytes) -> None:
+    """Un script editado se vuelve a leer igual y solo difiere del original en sus literales."""
+    try:
+        if script.encode(script.parse(blob)) != blob:
+            raise SaveError(f"El script editado {position} no se recodifica igual")
+        if not script.only_literals_changed(original, blob):
+            raise SaveError(f"En el script editado {position} cambió algo más que literales y valores")
+    except FormatError as error:
+        raise SaveError(f"El script editado {position} no se puede volver a leer: {error}") from error
 
 
 # --- Escritura --------------------------------------------------------------------------------

@@ -286,7 +286,7 @@ class ScriptTests(unittest.TestCase):
         header = script.parse_header(obsp.blob(2))
         self.assertEqual([symbol.text for symbol in header.symbols], list(fixtures.SCRIPT_SYMBOLS))
         self.assertEqual(script.header_problems(header, entry), [])
-        self.assertEqual(obsp.blob(2)[header.body_offset:], fixtures.SCRIPT_BODY)
+        self.assertEqual(script.encode(script.parse(obsp.blob(2))), obsp.blob(2))
 
     def test_problems_are_reported(self) -> None:
         obsp = ObspFile.parse(fixtures.make_obsp())

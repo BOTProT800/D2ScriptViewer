@@ -7,6 +7,10 @@ Abrir solo lee cabecera, cadenas e índice. Cada objeto se decodifica la primera
 vez que se pide y queda en caché. El archivo se lee entero y se cierra: abrirlo
 no lo bloquea ni escribe nada.
 
+Los scripts compilados (tipo 0) también tienen árbol: el de presentación de
+:func:`.formats.script.present`, cuyas hojas editables (literales y valores de
+tamaño fijo) son las del script, que es lo que se recodifica.
+
 Las ediciones cambian el árbol en caché y se guardan como operaciones reversibles
 (:mod:`.edits`). Un objeto está **modificado** si sus bytes actuales difieren de los
 de partida: editar y volver al valor original (a mano, deshaciendo o revirtiendo)
@@ -151,7 +155,12 @@ class Document:
             return self.obsp.blob(position)
         encoded = self._encoded.get(position)
         if encoded is None:
-            encoded = self._encoded[position] = bod.encode(self.bod(position))
+            tree = self.bod(position)
+            if isinstance(tree, script.ScriptTree):
+                encoded = script.encode(tree.script)
+            else:
+                encoded = bod.encode(tree)
+            self._encoded[position] = encoded
         return encoded
 
     def is_modified(self, position: int) -> bool:
@@ -165,7 +174,7 @@ class Document:
         """Árbol de partida, decodificado aparte (nunca se edita)."""
         tree = self._baseline_trees.get(position)
         if tree is None:
-            tree = self._baseline_trees[position] = bod.decode(self.obsp.blob(position))
+            tree = self._baseline_trees[position] = self._decode(position)
         return tree
 
     def changes(self, position: int, ref_label: diffing.RefLabel | None = None) -> list[Change]:
@@ -202,9 +211,13 @@ class Document:
     # --- Ediciones de valores --------------------------------------------------------------
 
     def node_at(self, position: int, path: tuple) -> object:
-        if self.objects[position].is_script:
-            raise EditError("Los scripts compilados son de solo lectura")
-        return bod.resolve(self.bod(position), path)
+        node = bod.resolve(self.bod(position), path)
+        if self.objects[position].is_script and not isinstance(node, script.EDITABLE_VALUES):
+            raise EditError(
+                "En los scripts compilados solo se editan, sin cambiar tamaños, los literales int, float y bool "
+                "y los valores por defecto e iniciales de esos tipos"
+            )
+        return node
 
     def property_label(self, position: int, path: tuple) -> str:
         return bod.path_label(self.bod(position), path)
@@ -240,7 +253,7 @@ class Document:
     def revert_object(self, position: int) -> EditGroup | None:
         if not self.is_modified(position):
             return None
-        fresh = bod.decode(self.obsp.blob(position))
+        fresh = self._decode(position)
         operation = ReplaceTree(position, self.bod(position), fresh)
         return self._push(EditGroup((operation,), f"Revertir {self.objects[position].label()}"))
 
@@ -374,8 +387,15 @@ class Document:
 
     # --- Decodificación ----------------------------------------------------------------------
 
+    def _decode(self, position: int) -> bod.BodDocument:
+        """Árbol nuevo a partir de los bytes de partida (de presentación si es un script)."""
+        blob = self.obsp.blob(position)
+        if self.objects[position].is_script:
+            return script.present(script.parse(blob))
+        return bod.decode(blob)
+
     def bod(self, position: int) -> bod.BodDocument:
-        """Árbol BOD del objeto, decodificado una sola vez.
+        """Árbol del objeto (BOD o, en los scripts, de presentación), decodificado una sola vez.
 
         Se puede llamar desde un hilo de trabajo: si dos hilos decodifican a la vez
         el mismo objeto, ``setdefault`` garantiza que todos reciben el mismo árbol,
@@ -383,8 +403,15 @@ class Document:
         """
         cached = self._bod_cache.get(position)
         if cached is None:
-            cached = self._bod_cache.setdefault(position, bod.decode(self.obsp.blob(position)))
+            cached = self._bod_cache.setdefault(position, self._decode(position))
         return cached
+
+    def script(self, position: int) -> script.Script:
+        """El script entero (modelo editable detrás del árbol de presentación)."""
+        tree = self.bod(position)
+        if not isinstance(tree, script.ScriptTree):
+            raise EditError("Este objeto no es un script compilado")
+        return tree.script
 
     def cached_bod(self, position: int) -> bod.BodDocument | None:
         """El árbol si ya se decodificó; nunca decodifica."""

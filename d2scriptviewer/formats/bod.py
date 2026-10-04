@@ -183,6 +183,16 @@ class Null(Value):
     type_label = "nulo"
 
 
+class Note(Value):
+    """Fila de presentación de solo lectura (scripts compilados): nunca se codifica como BOD."""
+
+    __slots__ = ("text", "type_label")
+
+    def __init__(self, text: str, type_label: str = "") -> None:
+        self.text = text
+        self.type_label = type_label  # type: ignore[misc]
+
+
 class Field:
     __slots__ = ("name", "value")
 
@@ -540,6 +550,12 @@ class _FingerprintEncoder(_Encoder):
         self.out += raw
 
     def value(self, value: Value) -> None:
+        if type(value) is Note:
+            raw = f"{value.type_label}\0{value.text}".encode(TEXT_ENCODING, "replace")  # type: ignore[attr-defined]
+            self.out.append(0xEE)
+            self.out += U32.pack(len(raw))
+            self.out += raw
+            return
         if type(value) is BodObject:
             # El índice depende de la posición en el blob; para comparar no cuenta.
             self.out.append(TAG_OBJECT)
@@ -727,6 +743,8 @@ def value_text(value: object) -> str:
         return count(len(value.items), "elemento")
     if isinstance(value, Pair):
         return f"{value_text(value.key)} → {value_text(value.value)}"
+    if isinstance(value, Note):
+        return value.text
     return ""
 
 

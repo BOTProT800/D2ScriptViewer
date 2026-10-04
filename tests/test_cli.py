@@ -90,6 +90,18 @@ class CliTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("No existe", err)
 
+    def test_disasm(self) -> None:
+        code, out, _err = run("disasm", "--archivo", str(self.file), "scripts/test")
+        self.assertEqual(code, 0, out)
+        for expected in ("clase base ScriptBase", "Health: int32, banderas 0x0A = 100", "0x0029  int 21",
+                         "args 3", "método getInventory", "función Unused: sin código",
+                         "estado Active · función onEnter (1 parámetro, 25 bytes):"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, out)
+        code, _out, err = run("disasm", "--archivo", str(self.file), "death/death_desc")
+        self.assertEqual(code, 2)
+        self.assertIn("no es un script", err)
+
     def test_hash_needs_no_file(self) -> None:
         code, out, _err = run("hash", "123456789", "Death")
         self.assertEqual(code, 0, out)

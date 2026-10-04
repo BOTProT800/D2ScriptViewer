@@ -26,7 +26,7 @@ from .. import __version__, edits, saving
 from ..document import Document
 from ..edits import EditGroup
 from ..errors import D2ScriptViewerError, EditError
-from ..formats import bod
+from ..formats import bod, script
 from ..formats.obsp import identity_text
 from ..references import Cancelled, FileIndexes, build_indexes, references_in, slot_key
 from ..settings import DEFAULT_GAME, find_default_obsp, load_settings, save_settings
@@ -479,25 +479,6 @@ class ViewerApp(tk.Tk):
         info = document.objects[position]
         self._display_started = time.perf_counter()
         title = self._object_title(position)
-        if info.is_script:
-            try:
-                header = document.script_header(position)
-            except D2ScriptViewerError as error:
-                self.property_view.show_message(title, f"No se pudo leer la cabecera del script: {error}")
-            else:
-                self.property_view.show_rows(
-                    title,
-                    [
-                        ("Versión", "u32", str(header.version)),
-                        ("Símbolos", "u32", f"{len(header.symbols):,} (ver pestaña Script)"),
-                        ("Hash de ruta", "u64", f"{header.path_hash:016X}"),
-                        ("Grupo", "u32", str(header.group)),
-                        ("Cuerpo", "bytecode", f"{info.entry.size - header.body_offset:,} bytes, solo lectura"),
-                    ],
-                )
-            self.details.show(document, info)
-            self._finish_display()
-            return
         if document.cached_bod(position) is not None or info.entry.size <= SYNC_DECODE_LIMIT:
             self._display_bod(position, path)
             return
@@ -539,7 +520,16 @@ class ViewerApp(tk.Tk):
         info = document.objects[position]
         extra: list[tuple[str, str]] = []
         tree = document.cached_bod(position)
-        if tree is not None:
+        if isinstance(tree, script.ScriptTree):
+            body = tree.script
+            extra.append(
+                ("Script", f"{count_text(len(body.members), 'miembro')}, "
+                           f"{count_text(len(body.initial_values), 'valor inicial', 'valores iniciales')}, "
+                           f"{count_text(len(body.functions), 'función', 'funciones')}, "
+                           f"{count_text(len(body.states), 'estado')}")
+            )
+            extra.append(("Editables", count_text(len(script.editable_leaves(body)), "literal o valor", "literales o valores")))
+        elif tree is not None:
             extra.append(("BOD", f"versión {tree.version}, campo desconocido {tree.flags}"))
             extra.append(
                 ("Nombres internos",

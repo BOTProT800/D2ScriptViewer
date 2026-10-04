@@ -1,5 +1,27 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Decisiones de la fase 7 (2026-10-04)**, confirmadas por el usuario a partir de un primer
+> análisis de los 3 690 scripts. Detrás de la cabecera, el cuerpo empieza por el hash del nombre
+> corto (= símbolo 1) y el de la clase base (= símbolo 2) en los 3 690. Le siguen una tabla de
+> miembros con valores por defecto codificados como en los BOD y una tabla de funciones (hash,
+> tamaño y bytecode con líneas, literales y nombres en línea). 3 422 cuerpos acaban en un u32 a 0.
+>
+> - **Alcance:** estructura completa del cuerpo, desensamblador de solo lectura y parches del
+>   mismo tamaño (literales de tamaño fijo y valores por defecto de los miembros). El
+>   descompilador a pseudocódigo queda fuera de la fase, para el futuro.
+> - **Vías:** solo análisis estadístico de los 3 690 scripts, con la función de hash para validar
+>   los nombres en línea. Nada del ejecutable: ni volcado de cadenas ni Ghidra.
+> - **Parada:** los parches solo se habilitan si los 3 690 scripts se interpretan y desensamblan
+>   al 100 %. Si las vías se agotan sin llegar, se para, se documenta lo descartado en
+>   `research/` y en la sección 2.4, y se pregunta al usuario.
+> - **Prueba en el juego:** un literal o valor por defecto con efecto visible que no se guarde en
+>   la partida, elegido con el desensamblador y ensayado sobre una copia. `NumSlots` se descarta:
+>   nunca se probó en el juego y puede afectar a las partidas guardadas.
+> - **Menores:** el desensamblado solo da nombre a los opcodes con significado comprobado (el
+>   resto, `op_XX`), y nada que cambie tamaños o saltos.
+>
+> Criterios de «Hecho cuando» en la sección 7.
+>
 > **Fase 6 cerrada (2026-10-04)** con la prueba en el juego (detalle en
 > `research/PRUEBAS_EN_JUEGO.md`). El usuario cambió tres `AnimationName` de
 > `death/death_animations` (`Jump`, `JumpF` y `PaperDoll_Idle`) a la cadena nueva
@@ -353,7 +375,8 @@ cadenas **nuevas** (falta la función de hash).
   minúsculas); solo hay coincidencias al azar. La función sigue sin conocerse.
 - El campo de la cabecera OBSP que vale `1` y el `u16 = 1` de la cabecera BOD.
 - La semántica de muchos enteros: algunos son IDs o hashes de 32 bits (p. ej. `OnStateOne = 0x4DFA84A3`).
-- El juego de opcodes completo del bytecode.
+- ~~El juego de opcodes completo del bytecode.~~ Formato resuelto en la fase 7 (apéndice A.3):
+  se conocen los 57 opcodes y sus operandos, pero de la mayoría no se sabe qué hacen.
 
 ### 2.5 Pista importante para los scripts
 
@@ -642,6 +665,27 @@ edición, y la copia del original es idéntica al archivo previo.
 4. A largo plazo: descompilador a pseudocódigo usando la gramática del compilador incluido en el
    ejecutable. Las ediciones que cambien el tamaño solo serán posibles cuando se entiendan los saltos.
 
+**Hecho cuando** (fijado el 2026-10-04 con el usuario; puntos 1 a 4 de arriba, sin el 4.º):
+
+- `formats/script.py` interpreta el cuerpo entero de los 3 690 scripts (miembros con sus valores
+  por defecto, funciones y tablas finales) hasta el último byte, y volver a serializarlos da los
+  mismos bytes en los 3 690;
+- el desensamblador decodifica de forma lineal todas las funciones justo hasta su tamaño
+  declarado, sin opcodes desconocidos, y todos los hashes en línea son los de sus nombres. La
+  tabla de opcodes, con sus recuentos, sustituye a las hipótesis del apéndice A.3;
+- la pestaña Script muestra los miembros y las funciones desensambladas, con líneas y nombres,
+  y existe `python -m d2scriptviewer disasm <objeto>`; el trabajo pesado va en un hilo;
+- se pueden parchear, sin cambiar tamaños, los literales de tamaño fijo y los valores por
+  defecto de los miembros, con validación, deshacer y cambios pendientes. Al guardar se vuelve a
+  desensamblar y se comprueba que solo cambiaron operandos;
+- hay tests sintéticos (un script generado por el propio serializador) y con el archivo real
+  (los 3 690 de ida y vuelta y desensamblados);
+- el juego carga un parche con efecto visible que no se guarda en la partida (punto de control
+  con el usuario), y restaurar devuelve `B46DD3DA…`;
+- están actualizados el apéndice A.3, `research/`, `CLAUDE.md` y `CHANGELOG.md`.
+
+Si no se llega al 100 % con la vía estadística, se para y se pregunta (decisión de arriba).
+
 ### Fase 8 — Exportación y parches (secundaria)
 
 - **JSON por objeto**: árbol con tipos y valores, con las referencias resueltas a `"ruta/nombre"`
@@ -864,22 +908,65 @@ u64 hashRuta   (= el del índice)
 u32 grupo      (= el del índice)
 ```
 
-**Hipótesis**, observadas en muestras y pendientes de formalizar en la fase 7:
+Detrás de la cabecera viene el cuerpo, formalizado en la fase 7 (2026-10-04) y verificado en
+los 3 690 scripts: se interpretan hasta el último byte y vuelven a serializarse idénticos.
 
-- Detrás vienen el hash del nombre corto, el hash de la clase base y tablas de miembros y
-  funciones; cada función lleva su hash, un u32 con el tamaño del código y el bytecode.
-- El bytecode es de pila y lleva los nombres en línea:
+```text
+u64 hash del nombre corto   (= símbolo 1, el último tramo de la ruta)
+u64 hash de la clase base   (= símbolo 2)
+u32 n; n × miembro:          u64 hash; u8 banderas; u8 tipo; [valor si banderas & 0x08]
+u32 n; n × valor inicial:    u64 hash; valor
+u32 n; n × función:          u64 hash; u32 tamaño; código[tamaño]
+u32 n; n × estado:           u64 hash; u32 n; n × función
+```
 
-| Opcode | Significado | Formato |
-|---|---|---|
-| `0x3B` | número de línea | u32 |
-| `0x23` | literal int32 | i32 |
-| `0x28` / `0x2C` | variable | u8 len + u64 hash + nombre\0 |
-| `0x3A` | miembro o método | u8 len + u64 hash + nombre\0 |
-| `0x39` | llamada por nombre | |
-| `0x29` | ¿asignación? | |
-| `0x32` | ¿fin de sentencia? | |
-| `0x2F` | ¿fin de función? | |
+- Todos los hashes del cuerpo están en la tabla de símbolos del propio script.
+- **Valores:** la codificación de los BOD (apéndice A.2), con los nombres como fichas
+  `00` + u32 que indexan la tabla de símbolos; nunca hay fichas `01`. Cada valor numera sus
+  objetos `07` desde 0.
+- **Miembros (8 244):** banderas `0x0A` (con valor), `0x04`, `0x02` y `0x00`. El valor aparece
+  si y solo si está el bit `0x08`. El tipo usa los tags BOD (2 int32, 3 float32, 4 bool,
+  5 cadena, 7 objeto, 9 lista, 10 mapa, 11 tupla) y además el 1, cuyo significado no se conoce.
+- **Valores iniciales (7 671):** 3 417 son de miembros del propio script declarados sin valor;
+  el resto, de variables que no se declaran en él. Ninguno repite un miembro con valor.
+- **Funciones (9 721, 12 vacías con tamaño 0) y estados (983).**
+
+**Código de una función:** el byte 0 es el número de parámetros (igual al número de
+instrucciones `0x28` en las 9 709 funciones con código), y después vienen instrucciones de
+longitud variable. Con esta tabla de 57 opcodes, todas las funciones se decodifican de forma
+lineal justo hasta su tamaño, y la última instrucción es siempre `0x2F`. Formatos de operando:
+N = u8 longitud + u64 hash + texto + NUL; los 111 603 nombres en línea llevan el hash de su texto.
+
+| Opcode | Nombre | Operando | Apariciones | Qué se comprobó |
+|---|---|---|---|---|
+| `0x3B` | línea | u32 | 64 366 | siempre crece dentro de una función (54 657 de 54 657) |
+| `0x23` | int / args | i32 | 32 353 | 25 090 son el número de argumentos de una llamada (ver abajo) |
+| `0x22` | float | f32 | 1 113 | 1 109 tienen 3 decimales o menos |
+| `0x25` | bool | u8 | 5 039 | solo 0 (2 529) o 1 (2 510) |
+| `0x24` | cadena | N | 12 391 | texto libre (frases, nombres de estado) |
+| `0x28` | parámetro | N | 3 702 | tantos como indica el byte 0 |
+| `0x38` | método | N | 18 756 | siempre precedido de `int n` + `0x2C` variable |
+| `0x39` | llamada | N | 6 329 | siempre precedido de `int n` |
+| `0x2F` | fin | — | 9 709 | último byte de cada función con código |
+| `0x10` | op_10 | u32 destino | 6 751 | destino absoluto en la función; siempre hacia delante |
+| `0x12` | op_12 | u32 destino | 2 415 | destino absoluto; hacia delante (2 001) o atrás (414) |
+| `0x2D` | op_2D | u32 | 9 091 | significado desconocido |
+| `0x20` `0x26` `0x27` `0x2C` `0x36` `0x3A` | op_XX | N | 314 · 42 · 3 308 · 47 470 · 5 · 19 286 | nombres en línea; `0x36` va precedido de `int n` |
+| resto (39) | op_XX | — | | `0x00`–`0x0A`, `0x0C`–`0x0F`, `0x13`–`0x1B`, `0x1E`, `0x1F`, `0x21`, `0x29`–`0x2B`, `0x2E`, `0x30`–`0x32`, `0x34`, `0x35`, `0x3D`, `0x3E`, `0x43` |
+
+- **Número de argumentos:** el `int n` que precede a una llamada vale entre 0 y 7. De los 2 102
+  destinos distintos, 2 063 se llaman siempre con el mismo n; los otros 39 admiten argumentos
+  opcionales (`setSaveValue` con 2 o 3, `setPosition` con 1 o 3). Esos literales no se parchean.
+- **Saltos:** de los 9 166, todos caen al principio de una instrucción salvo uno de
+  `maker_male/maker_youngin_emote_component`, que apunta a 6503 en una función de 336 bytes. Es
+  un dato del original y el desensamblador lo muestra tal cual.
+- **Hipótesis** (deducidas de la posición, sin comprobar): `0x29` asignación (`a.b = 21;` es
+  `0x2C a`, `0x3A b`, `int 21`, `0x29`, `0x32`), `0x32` fin de sentencia, `0x35` inicio de
+  sentencia, `0x10` salto si falso, `0x2A`/`0x2B` entrada y salida de bloque (5 026 cada uno).
+
+**Editable sin cambiar tamaños** (fase 7): los literales int (los que no son número de
+argumentos), float y bool del código, y los int, float y bool de los valores por defecto e
+iniciales. En el juego son 31 145.
 
 ### A.4 Función de hash de 64 bits
 

@@ -26,8 +26,10 @@ estructural) cerrada y validada en el juego: el juego tolera que se renumeren lo
 de un BOD. Sus decisiones (tuplas fijas, nulos solo en huecos de objeto, qué bloquea y qué avisa
 al guardar) están al principio del plan. Fase 6 cerrada y validada en el juego: la función de hash
 es un CRC-64 reflejado (deducido de los datos), los valores `0F` admiten cadenas nuevas con
-aviso, y el juego usa una cadena nueva para encontrar una animación del `.upak`. Siguen las
-fases 7 (scripts), 8 (exportación y parches) y 9 (distribución), en ese orden. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+aviso, y el juego usa una cadena nueva para encontrar una animación del `.upak`. Fase 7
+(scripts compilados) implementada: estructura completa, desensamblador y parches de literales
+del mismo tamaño; falta la prueba en el juego. Después, las fases 8 (exportación y parches) y 9
+(distribución), en ese orden. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -47,6 +49,7 @@ python -m d2scriptviewer show death/death_desc --profundidad 3
 python -m d2scriptviewer roundtrip --salida build\roundtrip.obsp
 python -m d2scriptviewer verify                             # comprobaciones del apéndice A
 python -m d2scriptviewer hash Death death/death_desc        # hash e idObjeto, sin archivo
+python -m d2scriptviewer disasm death/death                 # miembros y código de un script
 python -m unittest discover -s tests -v                     # todos los tests
 python -m unittest tests.<modulo>.<Clase>.<test>            # un solo test
 $env:D2SV_OBSP = 'C:\ruta\a\scripts.obsp'                   # archivo real para CLI y tests
@@ -60,11 +63,16 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
 ## Mapa del código
 
 - `d2scriptviewer/formats/`: `obsp.py` (contenedor y escritor), `bod.py` (árbol, codificador
-  canónico, recorrido y presentación), `script.py` (cabecera de tipo 0), `hashes.py`
+  canónico, recorrido y presentación; `Note` es una fila de solo lectura), `script.py` (script
+  completo: cabecera, miembros, valores iniciales, funciones y estados; `parse`, `encode`,
+  `only_literals_changed` y `present`, el árbol de presentación enlazado al script),
+  `bytecode.py` (tabla de 57 opcodes, `disassemble`/`assemble`, número de argumentos), `hashes.py`
   (`name_hash`, el CRC-64 del juego; `object_id`; diccionario global con variantes de
   mayúsculas y descuadres).
 - `document.py`: archivo abierto con decodificación bajo demanda y caché (`bod()` es seguro
-  entre hilos: todos reciben el mismo árbol).
+  entre hilos: todos reciben el mismo árbol). En los scripts, `bod()` da el árbol de
+  presentación (`script.ScriptTree`) y `blob()` recodifica su `script`; solo se editan las hojas
+  `Int32`/`Float32`/`Bool`, y las operaciones estructurales se rechazan.
 - `edits.py`: validación del texto del usuario por tipo (`parse_name` admite cadenas nuevas con
   su hash calculado), avisos de identificador y de cadena nueva, y operaciones
   reversibles (`ValueEdit`, `InsertItem`, `RemoveItem`, `MoveItem`, `ReplaceValue`,
@@ -75,7 +83,8 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
 - `validation.py`: claves repetidas y `FC` sin destino bloquean `prepare_save`; los `*ID`
   repetidos nuevos avisan (listas alineadas con el diff, no por ruta).
 - `saving.py`: `prepare_save` (en el hilo de Tk) y `execute_save` (en un hilo): autoverificar
-  (también que los hashes de la tabla de cadenas y de los objetos modificados cuadran),
+  (también que los hashes de la tabla de cadenas y de los objetos modificados cuadran, y que en
+  un script solo cambiaron literales),
   comprobar que se puede escribir, copia del original, copia rotativa, `.tmp` + `fsync` +
   `os.replace` y relectura con SHA. `restore_original`, `file_status`, `cleanup_orphan_tmp`.
   `fail_at` permite a los tests simular fallos en cada paso.
@@ -125,10 +134,12 @@ encuentran.
     campos y el nombre antes que el valor;
   - numera los objetos `07` en ese mismo orden;
   - recalcula los dos contadores de la cabecera.
-- **Scripts compilados (tipo 0)**: una tabla de símbolos propia, el hash de ruta, el grupo y
-  después un bytecode de pila con los nombres y los números de línea en línea. La estructura
-  del cuerpo está sin formalizar, así que se tratan como bytes opacos de solo lectura hasta
-  la fase 7.
+- **Scripts compilados (tipo 0)**, apéndice A.3: tabla de símbolos propia, hash de ruta y grupo;
+  después, hashes del nombre y de la clase base, miembros (con valor por defecto si las banderas
+  llevan `0x08`), valores iniciales, funciones (hash, tamaño, código) y estados. Los valores usan
+  la codificación de los BOD con los nombres como índices a los símbolos. El código empieza por
+  el número de parámetros y sigue con instrucciones de 57 opcodes; los nombres en línea llevan su
+  hash. Los 3 690 se reserializan idénticos.
 - **Hash de 64 bits** (apéndice A.4 del plan): CRC-64 reflejado con polinomio
   `0x0060034000F0D50B` (reflejado `0xD0AB0F0002C00600`) y valor inicial y XOR final `~0`, sobre
   los bytes de la cadena. Distingue mayúsculas, da 0 para la cadena vacía y es la misma en el
@@ -157,6 +168,9 @@ encuentran.
 - **Copia del original.** Al guardar encima de `X.obsp` se crea `X.original.obsp` una sola vez:
   es la copia del archivo tal como estaba, verificada por SHA-256 y en solo lectura. Nunca se
   sobrescribe ni se borra, y no se permite guardar encima de un `*.original.obsp`.
+- **Scripts: solo parches del mismo tamaño.** Se editan los literales int, float y bool del
+  código que no son número de argumentos (el `int n` antes de `0x38`/`0x39`/`0x36`) y los int,
+  float y bool de los valores por defecto e iniciales. Nada que cambie tamaños o saltos.
 - **Todo hash es el de su texto** (`hashes.name_hash`): guardar se bloquea si no cuadra. Las
   cadenas con hash nuevas solo entran en valores `0F`, con confirmación del usuario. Los nombres
   de campo y de clase, y las rutas, nombres e identidades de los objetos, no se editan (las

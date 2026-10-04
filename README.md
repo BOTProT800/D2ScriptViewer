@@ -49,7 +49,11 @@ un entero, redondeo de un float).
 - Los campos con aspecto de identificador (`…ID`, enteros enormes con pinta de hash) piden
   confirmación antes de cambiar.
 
-Los objetos de script compilado son de solo lectura.
+Los scripts compilados se ven en el panel central: miembros con sus valores por defecto, valores
+iniciales y el código desensamblado de cada función y estado (líneas, literales, llamadas,
+nombres). Solo se pueden cambiar, sin alterar tamaños, los literales int, float y bool del código
+y los valores de esos tipos; el número de argumentos de una llamada y el resto de filas son de
+solo lectura.
 
 ### Cambiar la estructura
 
@@ -94,6 +98,7 @@ python -m d2scriptviewer list --tipo Desc --filtro death
 python -m d2scriptviewer show death/death_desc --profundidad 3
 python -m d2scriptviewer verify
 python -m d2scriptviewer hash Death death/death_desc
+python -m d2scriptviewer disasm death/death
 ```
 
 Todas salvo `hash` aceptan `--archivo ruta\a\scripts.obsp`. `hash` calcula el hash de 64 bits

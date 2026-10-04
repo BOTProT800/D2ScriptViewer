@@ -5,7 +5,9 @@
 
 Cubre los 11 tags, las listas en modo 0 y 1, el mapa en modo 1, clases nativas y
 de script, nombres nuevos y por referencia, nulos, referencias externas y un
-script compilado de tipo 0 con cuerpo opaco.
+script compilado de tipo 0 generado con el propio serializador: miembros con y sin
+valor por defecto, valores iniciales, funciones (una vacía), un estado, literales,
+llamadas con su número de argumentos y un salto.
 
 Los hashes se calculan con la función del juego (``hashes.name_hash``) y las
 identidades son el hash del nombre en minúsculas, como en el archivo real.
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 import struct
 
-from d2scriptviewer.formats import bod
+from d2scriptviewer.formats import bod, bytecode, script
 from d2scriptviewer.formats.bod import (
     BodDocument,
     BodList,
@@ -34,6 +36,7 @@ from d2scriptviewer.formats.bod import (
     Pair,
     RawString,
 )
+from d2scriptviewer.formats.bytecode import Instruction
 from d2scriptviewer.formats.hashes import name_hash, object_id
 from d2scriptviewer.formats.obsp import IndexEntry, ObspHeader, build_obsp
 
@@ -130,16 +133,62 @@ def table_document() -> BodDocument:
     return BodDocument(4, 1, BodObject(None, native("FloatTable"), [F("Data", BodList(bod.MODE_VALUES, rows))]))
 
 
-SCRIPT_SYMBOLS = ("OnStart", "NumSlots", "getInventory")
-SCRIPT_BODY = bytes([0x3B, 1, 0, 0, 0, 0x23, 21, 0, 0, 0, 0x29, 0x32, 0x2F])
+SCRIPT_SYMBOLS = (
+    "scripts/test", "test", "ScriptBase", "Health", "Label", "Speed", "Stats", "Damage",
+    "Items", "Enabled", "OnStart", "Unused", "Active", "onEnter", "NumSlots", "getInventory",
+)
 
 
-def script_blob(path: str = "scripts/test", group: int = SCRIPT_GROUP) -> bytes:
+def I(opcode: int, operand: object = None) -> Instruction:
+    """Una instrucción; el offset lo pone el desensamblador al releer."""
+    return Instruction(0, opcode, operand)
+
+
+def _on_start() -> script.Function:
+    instructions = [
+        # this.NumSlots = 21;
+        I(0x3B, 1), I(0x35), I(0x2C, N("this")), I(0x3A, N("NumSlots")), I(0x23, Int32.of(21)), I(0x29), I(0x32),
+        # this.getInventory(0.5, true, 'hola mundo');  — el 3 es el número de argumentos
+        I(0x3B, 2), I(0x35), I(0x22, Float32.of(0.5)), I(0x25, Bool(1)), I(0x24, N("hola mundo")),
+        I(0x23, Int32.of(3)), I(0x2C, N("this")), I(0x38, N("getInventory")), I(0x32),
+        # print();
+        I(0x3B, 3), I(0x35), I(0x23, Int32.of(0)), I(0x39, N("print")), I(0x32),
+        I(0x3B, 4), I(0x12, 0), I(0x2F),
+    ]
+    function = script.Function(N("OnStart"), 0, instructions)
+    # El salto va a la última instrucción: los offsets salen de desensamblar el código.
+    _params, decoded = bytecode.disassemble(function.code)
+    instructions[-2].operand = decoded[-1].offset
+    return function
+
+
+def script_document(path: str = "scripts/test", group: int = SCRIPT_GROUP) -> script.Script:
     symbols = b"".join(
         struct.pack("<QI", name_hash(text), len(text)) + text.encode("latin-1") for text in SCRIPT_SYMBOLS
     )
     head = struct.pack("<III", 1, len(SCRIPT_SYMBOLS), max(len(text) for text in SCRIPT_SYMBOLS))
-    return head + symbols + struct.pack("<QI", name_hash(path), group) + SCRIPT_BODY
+    head += symbols + struct.pack("<QI", name_hash(path), group)
+    on_enter = script.Function(N("onEnter"), 1, [I(0x2A), I(0x28, N("other")), I(0x3B, 10), I(0x2B), I(0x2F)])
+    return script.Script(
+        script.parse_header(head),
+        head,
+        N("test"),
+        N("ScriptBase"),
+        [
+            script.Member(N("Health"), 0x0A, 0x02, Int32.of(100)),
+            script.Member(N("Label"), 0x0A, 0x05, RawString("hola")),
+            script.Member(N("Speed"), 0x04, 0x03, None),
+            script.Member(N("Stats"), 0x0A, 0x07, BodObject(0, native("Stats"), [F("Damage", Int32.of(-7))])),
+            script.Member(N("Items"), 0x0A, 0x09, BodList(bod.MODE_VALUES, [Float32.of(1.5), Bool(1)])),
+        ],
+        [script.InitialValue(N("Speed"), Float32.of(2.5)), script.InitialValue(N("Enabled"), Bool(0))],
+        [_on_start(), script.Function(N("Unused"), None)],
+        [script.State(N("Active"), [on_enter])],
+    )
+
+
+def script_blob(path: str = "scripts/test", group: int = SCRIPT_GROUP) -> bytes:
+    return script.encode(script_document(path, group))
 
 
 #: (ruta, nombre, carpeta, clase, grupo, id, tipo)

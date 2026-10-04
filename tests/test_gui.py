@@ -245,6 +245,30 @@ class EditingGuiTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(self.view.tree.item(self.row("Mesh"), "values"), ("nombre", "Fire"))
         self.assertEqual(len(self.questions), 2)
 
+    def test_script_literal_edit_in_cell(self) -> None:
+        position = self.document.find("scripts/test")[0].position
+        self.app.navigate(position)
+        tree = self.document.bod(position)
+        path = next(p for p, _n in bod.walk(tree.root) if bod.path_label(tree, p) == "Funciones.OnStart.0x0029")
+        self.view.reveal(path)
+        iid = self.view._iid_by_path[path]
+        self.assertEqual(self.view.tree.item(iid, "values"), ("int32", "21"))
+        self.view.begin_edit()
+        self.view.editor.var.set("42")
+        self.view.editor.commit()
+        self.assertEqual(self.view.tree.item(iid, "values"), ("int32", "42"))
+        self.assertIn("edited", self.view.tree.item(iid, "tags"))
+        self.assertEqual(self.document.modified_positions, {position})
+        self.assertEqual(self.view.structure_actions(bod.resolve(tree, path), path), [])
+        # Una fila de solo lectura (número de argumentos) no abre el editor.
+        argc = next(p for p, _n in bod.walk(tree.root) if bod.path_label(tree, p) == "Funciones.OnStart.0x0052")
+        self.view.reveal(argc)
+        self.view.begin_edit()
+        self.assertFalse(self.view.editing)
+        self.assertIn("Solo lectura", self.view.hint_var.get())
+        self.app.undo()
+        self.assertEqual(self.document.current_data(), fixtures.make_obsp())
+
     def test_identifier_fields_ask_first(self) -> None:
         self.answer = False
         self.type_into_editor("ItemID", "99")
@@ -546,11 +570,12 @@ class RealViewerTests(unittest.TestCase):
         try:
             app.open_file(REAL_OBSP)
             self.assertTrue(pump(app, lambda: app.indexes is not None, timeout=60))
-            largest = sorted(app.document.objects, key=lambda info: -info.entry.size)[:15]
+            by_size = sorted(app.document.objects, key=lambda info: -info.entry.size)
+            largest = by_size[:15] + [info for info in by_size if info.is_script][:10]
             for info in largest:
                 started = time.perf_counter()
                 app.navigate(info.position)
-                self.assertTrue(pump(app, lambda: app.property_view.document is not None or info.is_script))
+                self.assertTrue(pump(app, lambda: app.property_view.document is not None))
                 self.assertLess(time.perf_counter() - started, 1.0, info.path)
         finally:
             app.destroy()

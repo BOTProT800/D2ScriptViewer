@@ -9,6 +9,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ### Added
 
+- Scripts compilados (fase 7): estructura completa del cuerpo (miembros con sus valores por
+  defecto, valores iniciales, funciones y estados) y desensamblador de los 57 opcodes, verificados
+  en los 3 690 scripts del juego, que se reserializan idénticos. El panel central muestra los
+  miembros y el código de cada función con sus líneas, literales, llamadas y nombres.
+- Parches de scripts sin cambiar tamaños: literales int, float y bool del código (salvo el número
+  de argumentos de una llamada) y valores por defecto e iniciales de esos tipos, con deshacer,
+  marcas y cambios pendientes. Al guardar se comprueba que solo cambiaron esos valores.
+- `python -m d2scriptviewer disasm <script>`, y `verify` comprueba también el cuerpo y el
+  bytecode de los scripts y los hashes de los 111 603 nombres en línea.
 - Función de hash de 64 bits del juego (fase 6): un CRC-64 reflejado con polinomio
   `0x0060034000F0D50B`, deducido de los 70 182 pares del archivo y comprobado en todos ellos.
   `idObjeto` es el hash del nombre en minúsculas en los 7 862 objetos.

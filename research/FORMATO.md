@@ -68,3 +68,48 @@ y aparecen 67 453 veces (`OnStateOne = 0x4DFA84A3`, `MeshID`…). Comparados con
 baja del CRC-64, y con el CRC-32 de zlib, de las 70 182 cadenas conocidas y sus minúsculas, solo
 coinciden 3, 1 y 0 valores, lo que cabe esperar del azar. Usan otra función, o hashean textos que
 no están en el archivo; no se ha investigado más.
+
+## 2026-10-04 — Fase 7: cuerpo y bytecode de los scripts
+
+Formalizados solo con los 3 690 scripts del archivo, sin analizar el ejecutable (decisión de la
+fase). La especificación está en el apéndice A.3 del plan; aquí, cómo se llegó a ella.
+
+### Estructura del cuerpo
+
+1. Los dos primeros u64 del cuerpo son el hash del símbolo 1 (el último tramo de la ruta) y el
+   del símbolo 2 (la clase base) en los 3 690.
+2. **Miembros.** Un ejemplo (`base/equipweaponmodule`) mostraba entradas `hash, 0A, 05, 05 FF
+   len "(Equip Weapon)"`: hash, banderas, tipo y un valor con la codificación de los BOD. El valor
+   aparece si y solo si las banderas llevan `0x08`. Los objetos `07` dentro de los valores usan
+   fichas `00` + índice a la tabla de símbolos (`ItemDesc` = símbolo 4), así que el decodificador
+   de los BOD sirve sembrando su tabla de nombres con los símbolos.
+3. **Segunda tabla:** hash + valor (p. ej. `WeaponID = 0`), los valores iniciales.
+4. **Funciones:** hash, u32 tamaño y código. Con eso se leían enteros 3 406 cuerpos, que acababan
+   en un u32 a 0.
+5. **Estados:** los 275 restantes tenían esa tabla final llena: hash del estado, u32 con su
+   número de funciones y las funciones (`sh_plinth/plinth`: `DeActivate`, `Active`…). Los 9 que
+   fallaban tenían funciones de tamaño 0.
+6. Resultado: los 3 690 cuerpos se consumen exactamente y vuelven a serializarse idénticos; todos
+   los hashes están en la tabla de símbolos de su script.
+
+### Bytecode
+
+- **Desensamblado lineal con validación:** se fue ampliando una tabla de opcodes y formatos de
+  operando, y cada pasada exigía que todos los nombres en línea llevaran el hash de su texto
+  (CRC-64 de la fase 6) y que la decodificación acabara justo al final de la función. Las
+  funciones decodificadas enteras pasaron de 2 320 a 5 653, 7 445, 8 740, 9 591, 9 715 y 9 721 en
+  siete pasadas, sin ningún hash erróneo por el camino.
+- **Comprobaciones independientes de la tabla:**
+  - los destinos de `0x10` y `0x12` son offsets absolutos en la función y caen al principio de
+    una instrucción (9 165 de 9 166; la excepción es un dato del original, ver abajo);
+  - las líneas `0x3B` siempre crecen;
+  - los booleanos `0x25` solo valen 0 o 1, y los floats `0x22` son valores redondos;
+  - el byte 0 coincide con el número de `0x28` (parámetros) en las 9 709 funciones con código;
+  - toda llamada `0x39` va precedida de `int n` y todo `0x38` de `int n` + `0x2C` variable. Ese n
+    vale de 0 a 7 y es el mismo para cada destino en 2 063 de 2 102, así que es el número de
+    argumentos: 25 090 de los 32 353 literales `int` no son valores del usuario.
+- **Dato raro del original:** en `maker_male/maker_youngin_emote_component`, un `0x10` apunta a
+  6503 en una función de 336 bytes. No impide decodificar; se muestra tal cual.
+- **Lo que sigue sin saberse:** qué hacen la mayoría de los opcodes sin operando, `0x2D` (u32) y
+  los que llevan nombre sin llamada (`0x2C`, `0x3A`, `0x27`…). Las hipótesis por posición están
+  en el apéndice A.3.

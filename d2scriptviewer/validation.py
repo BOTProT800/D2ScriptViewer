@@ -73,6 +73,8 @@ def _id_lists(tree: bod.BodDocument) -> list[tuple[tuple, bod.BodList]]:
 def validate(document: Document) -> ValidationReport:
     report = ValidationReport()
     for position in sorted(document.modified_positions):
+        if document.objects[position].is_script:
+            continue  # solo cambian literales del mismo tamaño: no hay claves ni referencias nuevas
         tree = document.bod(position)
         original = document.baseline_tree(position)
         owner = document.objects[position].label()

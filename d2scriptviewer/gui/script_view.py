@@ -3,7 +3,8 @@
 
 """Pestaña «Script»: cabecera y tabla de símbolos de un script compilado (tipo 0).
 
-El bytecode es de solo lectura hasta la fase 7; aquí solo se muestra su tamaño.
+El cuerpo (miembros, funciones desensambladas y estados) se ve y se parchea en el
+panel de propiedades.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ class ScriptView(ttk.Frame):
         self.summary_var.set(
             f"Versión {header.version} · {len(header.symbols):,} símbolos · "
             f"cuerpo de {blob_size - header.body_offset:,} bytes a partir de 0x{header.body_offset:X}. "
-            "El bytecode es de solo lectura."
+            "Los miembros y el código desensamblado están en el panel central."
         )
         for symbol in header.symbols:
             self.tree.insert("", "end", values=(f"{symbol.hash:016X}", symbol.text))
