@@ -13,7 +13,7 @@ import unittest
 from collections import Counter
 
 from d2scriptviewer.formats import bod, script
-from d2scriptviewer.formats.hashes import HashDictionary, document_names
+from d2scriptviewer.formats.hashes import HashDictionary, document_names, name_hash, object_id
 from d2scriptviewer.formats.obsp import ObspFile, rebuild, string_table_order
 from d2scriptviewer.verification import verify_data
 from tests.support import ORIGINAL_SHA256, ORIGINAL_SIZE, real_bytes, requires_real_file
@@ -134,6 +134,20 @@ class GoldenTests(unittest.TestCase):
         self.assertEqual(dictionary.conflicts, [])
         self.assertEqual(dictionary.reverse_conflicts(), [])
         self.assertTrue(all(text.isascii() for _hash, text in dictionary.pairs()))
+        # Fase 6: la función reproduce los 70 182 pares.
+        wrong = [(value_hash, text) for value_hash, text in dictionary.pairs() if name_hash(text) != value_hash]
+        self.assertEqual(wrong, [])
+        self.assertEqual(dictionary.mismatches(), [])
+
+    def test_index_hashes_and_identities(self) -> None:
+        """Fase 6: hashRuta, hashNombre, hashCarpeta y hashClase son los de sus textos, e
+        ``idObjeto`` es el hash del nombre en minúsculas, en los 7 862 objetos."""
+        text = self.obsp.strings.__getitem__
+        for entry in self.obsp.entries:
+            for value_hash in (entry.path_hash, entry.name_hash, entry.folder_hash, entry.class_hash):
+                self.assertEqual(name_hash(text(value_hash)), value_hash)
+        identities = sum(object_id(text(entry.name_hash)) == entry.object_id for entry in self.obsp.entries)
+        self.assertEqual(identities, 7862)
 
     def test_verify_report(self) -> None:
         report = verify_data(self.data)

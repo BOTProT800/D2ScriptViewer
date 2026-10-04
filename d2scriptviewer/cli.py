@@ -14,6 +14,7 @@ from . import __version__
 from .document import Document, ObjectInfo
 from .errors import D2ScriptViewerError
 from .formats import bod
+from .formats.hashes import name_hash, object_id
 from .formats.obsp import KIND_NAMES, STEAM_ORIGINAL_SHA256, identity_text, kind_name, rebuild
 from .settings import OBSP_ENV, find_default_obsp
 from .verification import verify_data
@@ -53,6 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
     roundtrip.add_argument("--salida", type=Path, help="escribir aquí el archivo reconstruido")
 
     add_command("verify", "comprobar el archivo entero (apéndice A del plan)")
+
+    hashing = subparsers.add_parser(
+        "hash",
+        help="calcular el hash de 64 bits de una o varias cadenas",
+        description="Calcula el hash del juego (CRC-64, apéndice A.4 del plan) y el idObjeto que tendría "
+        "un objeto con ese nombre (el hash en minúsculas). No lee ningún archivo.",
+    )
+    hashing.add_argument("textos", nargs="+", metavar="texto", help="cadena ASCII (distingue mayúsculas)")
     return parser
 
 
@@ -202,6 +211,16 @@ def command_roundtrip(document: Document, path: Path, output: Path | None) -> in
     return 0 if identical else 1
 
 
+def command_hash(texts: list[str]) -> int:
+    for text in texts:
+        if not text.isascii():
+            raise D2ScriptViewerError(f"«{text}» no es ASCII: el archivo solo tiene cadenas ASCII")
+    print(f"{'hash':<16}  {'idObjeto':<16}  texto")
+    for text in texts:
+        print(f"{name_hash(text):016X}  {object_id(text):016X}  {text}")
+    return 0
+
+
 def command_verify(path: Path) -> int:
     data = path.read_bytes()
     report = verify_data(data)
@@ -232,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     _tolerant_output()
     try:
+        if args.command == "hash":
+            return command_hash(args.textos)
         path = _resolve_path(args.archivo)
         if args.command == "verify":
             return command_verify(path)

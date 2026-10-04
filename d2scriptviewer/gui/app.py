@@ -583,7 +583,7 @@ class ViewerApp(tk.Tk):
             return str(error)
         if state == edits.get_state(node):
             return None
-        if not self._confirm_identifier(position, path, node):
+        if not self._confirm_edit(position, path, node, state):
             return None
         try:
             group = document.edit(position, path, state)
@@ -593,12 +593,16 @@ class ViewerApp(tk.Tk):
             self._after_change(group, reveal=False)
         return None
 
-    def _confirm_identifier(self, position: int, path: tuple, node: object) -> bool:
+    def _confirm_edit(self, position: int, path: tuple, node: object, state: object) -> bool:
+        """Pide confirmación si el campo parece un identificador o si la cadena es nueva."""
         assert self.document is not None
-        warning = edits.identifier_warning(edits.field_name(self.document.bod(position), path), node)
-        if warning is None:
+        warnings = [edits.identifier_warning(edits.field_name(self.document.bod(position), path), node)]
+        if isinstance(state, bod.Name):
+            warnings.append(edits.new_name_warning(state, self.indexes.dictionary if self.indexes else None))
+        message = "\n\n".join(warning for warning in warnings if warning)
+        if not message:
             return True
-        return bool(self.ask(APP_NAME, f"{warning}\n\n¿Aplicar el cambio de todos modos?", icon="warning"))
+        return bool(self.ask(APP_NAME, f"{message}\n\n¿Aplicar el cambio de todos modos?", icon="warning"))
 
     def pick_reference(self, node: object, path: tuple) -> None:
         document, position = self.document, self.position

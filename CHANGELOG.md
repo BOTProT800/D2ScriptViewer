@@ -9,6 +9,17 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ### Added
 
+- Función de hash de 64 bits del juego (fase 6): un CRC-64 reflejado con polinomio
+  `0x0060034000F0D50B`, deducido de los 70 182 pares del archivo y comprobado en todos ellos.
+  `idObjeto` es el hash del nombre en minúsculas en los 7 862 objetos.
+- Cadenas con hash nuevas: los valores `0F` admiten cualquier texto ASCII, con el hash
+  calculado. Si no aparece en el archivo se pide confirmación, con un aviso si solo difiere en
+  mayúsculas de una conocida; una colisión de hash con otra cadena da error. La pista del editor
+  muestra el hash.
+- `python -m d2scriptviewer hash <texto>…`: hash e `idObjeto` de cada texto, sin leer archivos.
+- `verify` comprueba la función de hash en todos los pares y que `idObjeto` es el hash del
+  nombre en minúsculas. Guardar se bloquea si un hash de la tabla de cadenas o de un objeto
+  modificado no cuadra con su texto.
 - Edición estructural de BOD (fase 5): duplicar, eliminar, subir y bajar elementos de listas y
   entradas de mapas (Ctrl+D, Supr, Alt+↑/↓, clic derecho o Editar → Estructura); poner a nulo un
   objeto o una referencia; rellenar un nulo con la copia de un objeto de una clase que ya aparece

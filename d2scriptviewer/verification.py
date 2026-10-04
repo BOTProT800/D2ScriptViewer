@@ -16,7 +16,7 @@ from typing import Callable
 
 from .errors import FormatError
 from .formats import bod, script
-from .formats.hashes import HashDictionary, document_names
+from .formats.hashes import HashDictionary, document_names, object_id
 from .formats.obsp import STEAM_ORIGINAL_SHA256, ObspFile, identity_text, rebuild, string_table_order
 
 Progress = Callable[[int, int], None]
@@ -147,6 +147,22 @@ def verify_data(data: bytes, progress: Progress | None = None) -> VerifyReport:
         "Misma cadena, mismo hash",
         conflicts == 0,
         f"{len(dictionary):,} pares hash↔cadena, {conflicts} conflictos",
+    )
+    mismatches = dictionary.mismatches()
+    report.add(
+        "Función de hash (CRC-64)",
+        not mismatches,
+        f"{len(dictionary) - len(mismatches):,} / {len(dictionary):,} pares"
+        + "".join(f"; no cuadra: {value_hash:016X} «{text[:40]}»" for value_hash, text in mismatches[:3]),
+    )
+    named = [(entry, obsp.text(entry.name_hash)) for entry in entries]
+    named = [(entry, name) for entry, name in named if name is not None]
+    wrong_ids = [name for entry, name in named if object_id(name) != entry.object_id]
+    report.add(
+        "idObjeto = hash del nombre en minúsculas",
+        not wrong_ids and len(named) == len(entries),
+        f"{len(named) - len(wrong_ids):,} / {len(entries):,} objetos"
+        + "".join(f"; no cuadra: {name}" for name in wrong_ids[:3]),
     )
     report.add("Cadenas solo ASCII", non_ascii == 0, f"{non_ascii} no ASCII")
     dangling = sum(1 for identity in references if identity not in identities)

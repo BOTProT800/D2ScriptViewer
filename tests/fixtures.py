@@ -7,13 +7,12 @@ Cubre los 11 tags, las listas en modo 0 y 1, el mapa en modo 1, clases nativas y
 de script, nombres nuevos y por referencia, nulos, referencias externas y un
 script compilado de tipo 0 con cuerpo opaco.
 
-Los hashes son inventados (BLAKE2b de 8 bytes); la cadena vacía tiene hash 0,
-como en el juego.
+Los hashes se calculan con la función del juego (``hashes.name_hash``) y las
+identidades son el hash del nombre en minúsculas, como en el archivo real.
 """
 
 from __future__ import annotations
 
-import hashlib
 import struct
 
 from d2scriptviewer.formats import bod
@@ -35,20 +34,15 @@ from d2scriptviewer.formats.bod import (
     Pair,
     RawString,
 )
+from d2scriptviewer.formats.hashes import name_hash, object_id
 from d2scriptviewer.formats.obsp import IndexEntry, ObspHeader, build_obsp
 
 GROUP = 10000
 SCRIPT_GROUP = 10001
 
 
-def fake_hash(text: str) -> int:
-    if not text:
-        return 0
-    return int.from_bytes(hashlib.blake2b(text.encode("latin-1"), digest_size=8).digest(), "little")
-
-
 def N(text: str) -> Name:
-    return Name(fake_hash(text), text)
+    return Name(name_hash(text), text)
 
 
 def native(name: str) -> ClassRef:
@@ -63,11 +57,11 @@ def F(name: str, value: bod.Value) -> Field:
     return Field(N(name), value)
 
 
-# Identidades de los objetos del fixture.
-DESC_ID = 0x1111
-INSTANCE_ID = 0x2222
-SCRIPT_ID = 0x3333
-TABLE_ID = 0x4444
+# Identidades de los objetos del fixture: el hash del nombre en minúsculas.
+DESC_ID = object_id("Death_Desc")
+INSTANCE_ID = object_id("WeaponBehavior_Inst")
+SCRIPT_ID = object_id("Test")
+TABLE_ID = object_id("Char_Test")
 
 
 def desc_document() -> BodDocument:
@@ -142,10 +136,10 @@ SCRIPT_BODY = bytes([0x3B, 1, 0, 0, 0, 0x23, 21, 0, 0, 0, 0x29, 0x32, 0x2F])
 
 def script_blob(path: str = "scripts/test", group: int = SCRIPT_GROUP) -> bytes:
     symbols = b"".join(
-        struct.pack("<QI", fake_hash(text), len(text)) + text.encode("latin-1") for text in SCRIPT_SYMBOLS
+        struct.pack("<QI", name_hash(text), len(text)) + text.encode("latin-1") for text in SCRIPT_SYMBOLS
     )
     head = struct.pack("<III", 1, len(SCRIPT_SYMBOLS), max(len(text) for text in SCRIPT_SYMBOLS))
-    return head + symbols + struct.pack("<QI", fake_hash(path), group) + SCRIPT_BODY
+    return head + symbols + struct.pack("<QI", name_hash(path), group) + SCRIPT_BODY
 
 
 #: (ruta, nombre, carpeta, clase, grupo, id, tipo)
@@ -166,13 +160,13 @@ def fixture_parts() -> tuple[list[IndexEntry], list[bytes], dict[int, str]]:
     ]
     entries = []
     strings: dict[int, str] = {}
-    for (path, name, folder, class_name, group, object_id, kind), blob in zip(OBJECTS, blobs):
+    for (path, name, folder, class_name, group, identity, kind), blob in zip(OBJECTS, blobs):
         for text in (path, name, folder, class_name):
-            strings[fake_hash(text)] = text
+            strings[name_hash(text)] = text
         entries.append(
             IndexEntry(
-                fake_hash(path), object_id, 0, len(blob), group, kind,
-                fake_hash(name), fake_hash(folder), fake_hash(class_name),
+                name_hash(path), identity, 0, len(blob), group, kind,
+                name_hash(name), name_hash(folder), name_hash(class_name),
             )
         )
     return entries, blobs, strings

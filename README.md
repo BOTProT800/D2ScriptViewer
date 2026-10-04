@@ -38,9 +38,10 @@ un entero, redondeo de un float).
 - **Enteros:** decimal o `0x…` (patrón de 32 bits). **Floats:** admiten coma decimal; no se
   aceptan NaN ni infinitos. **Bools:** true/false.
 - **Cadenas sin hash** (`'…'`): cualquier texto ASCII.
-- **Nombres** (cadenas con hash): solo los que ya aparecen en el archivo, con autocompletado.
-  Crear nombres nuevos exige conocer la función de hash del juego, que aún no se ha
-  identificado.
+- **Nombres** (cadenas con hash): con autocompletado entre los que ya aparecen en el archivo.
+  También se admite un nombre nuevo (ASCII): la herramienta calcula su hash y pide
+  confirmación, porque el juego solo lo reconocerá si existe algo con ese nombre. Distingue
+  mayúsculas, y avisa si el nombre nuevo solo se diferencia en eso de uno conocido.
 - **Referencias** (`→ …`): F2 abre un selector de objetos; el doble clic sigue llevando al
   destino.
 - Ctrl+Z / Ctrl+Y deshacen y rehacen; el menú Editar y el clic derecho permiten revertir una
@@ -92,9 +93,12 @@ python -m d2scriptviewer info
 python -m d2scriptviewer list --tipo Desc --filtro death
 python -m d2scriptviewer show death/death_desc --profundidad 3
 python -m d2scriptviewer verify
+python -m d2scriptviewer hash Death death/death_desc
 ```
 
-Todas aceptan `--archivo ruta\a\scripts.obsp`.
+Todas salvo `hash` aceptan `--archivo ruta\a\scripts.obsp`. `hash` calcula el hash de 64 bits
+del juego para cada texto y el `idObjeto` que tendría un objeto con ese nombre, sin leer ningún
+archivo.
 
 ## Tests
 

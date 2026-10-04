@@ -21,6 +21,10 @@ Lo siguiente es trabajo del mismo autor y no requiere entrada, pero se deja cons
 - **Formato OBSP, BOD y cabecera de scripts:** análisis local del 3 de octubre de 2026,
   documentado en el apéndice A de [PLAN_MAESTRO.md](PLAN_MAESTRO.md).
 - **Patrón `NumSlots` del bytecode:** `Darksiders2DLL/research/INVENTORY_SCRIPT.md`.
+- **Función de hash de 64 bits** (fase 6, 2026-10-04): un CRC-64 reflejado, algoritmo de manual
+  implementado en `formats/hashes.py` sin copiar código de nadie. Sus parámetros (polinomio
+  `0x0060034000F0D50B`, valor inicial y XOR final `~0`) se dedujeron analizando los pares
+  hash↔cadena del propio archivo (`research/FORMATO.md`).
 - **Tema oscuro, estructura del repositorio, CI y preferencias:** Darkstractor.
 
 ## Tools

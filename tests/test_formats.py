@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import math
+import random
 import struct
 import unittest
+from dataclasses import replace
 
 from d2scriptviewer.errors import FormatError
-from d2scriptviewer.formats import bod, script
-from d2scriptviewer.formats.hashes import HashDictionary, document_names
+from d2scriptviewer.formats import bod, hashes, script
+from d2scriptviewer.formats.hashes import HashDictionary, document_names, first_wrong_name, name_hash, object_id
 from d2scriptviewer.formats.obsp import (
     HEADER,
     INDEX_ENTRY,
@@ -317,6 +319,82 @@ class HashDictionaryTests(unittest.TestCase):
         self.assertEqual(dictionary.reverse_conflicts(), [("a", [1, 3])])
 
 
+    def test_case_variants_and_mismatches(self) -> None:
+        dictionary = HashDictionary()
+        dictionary.update((name_hash(text), text) for text in ("Jump", "jump", "JUMP", "Run"))
+        self.assertEqual(dictionary.case_variants("jump"), ["JUMP", "Jump"])
+        self.assertEqual(dictionary.case_variants("jUmP"), ["JUMP", "Jump", "jump"])
+        self.assertEqual(dictionary.case_variants("Walk"), [])
+        self.assertEqual(dictionary.mismatches(), [])
+        dictionary.add(7, "inventado")
+        dictionary.add(name_hash("Run"), "Otro")  # conflicto: ese hash ya es de «Run»
+        self.assertEqual(sorted(dictionary.mismatches()), sorted([(7, "inventado"), (name_hash("Run"), "Otro")]))
+
+    def test_first_wrong_name(self) -> None:
+        good = [hashes.make_name("Health"), hashes.make_name(""), hashes.make_name("Health")]
+        self.assertIsNone(first_wrong_name(good))
+        self.assertEqual(first_wrong_name(good + [bod.Name(5, "Speed")]), bod.Name(5, "Speed"))
+
+
+MASK = 0xFFFFFFFFFFFFFFFF
+
+
+def reflect(value: int, bits: int) -> int:
+    return int(f"{value:0{bits}b}"[::-1], 2)
+
+
+def bitwise_hash(text: str) -> int:
+    """Referencia independiente: CRC-64 bit a bit en forma normal, con entrada y salida reflejadas."""
+    crc = hashes.CRC64_INIT
+    for byte in text.encode("latin-1"):
+        crc ^= reflect(byte, 8) << 56
+        for _ in range(8):
+            crc = ((crc << 1) ^ (hashes.CRC64_POLY if crc >> 63 else 0)) & MASK
+    return reflect(crc, 64) ^ hashes.CRC64_XOROUT
+
+
+class HashFunctionTests(unittest.TestCase):
+    """La función de hash del juego (fase 6): CRC-64 reflejado, apéndice A.4 del plan."""
+
+    def test_check_value_and_empty_string(self) -> None:
+        self.assertEqual(name_hash("123456789"), hashes.CRC64_CHECK)
+        self.assertEqual(hashes.CRC64_CHECK, 0x9AFB180E4C211BB4)
+        self.assertEqual(name_hash(""), 0)
+
+    def test_polynomial_forms_agree(self) -> None:
+        self.assertEqual(reflect(hashes.CRC64_POLY_REFLECTED, 64), hashes.CRC64_POLY)
+
+    def test_table_matches_bitwise_reference(self) -> None:
+        rng = random.Random(6)
+        texts = ["", "a", "Death", "oc\\Body\\slayer", "death/death_desc"]
+        texts += ["".join(chr(rng.randrange(32, 127)) for _ in range(rng.randrange(1, 90))) for _ in range(200)]
+        for text in texts:
+            with self.subTest(text=text[:20]):
+                self.assertEqual(name_hash(text), bitwise_hash(text))
+
+    def test_case_sensitive_and_object_id(self) -> None:
+        self.assertNotEqual(name_hash("Death"), name_hash("death"))
+        self.assertEqual(object_id("Death_Desc"), name_hash("death_desc"))
+        self.assertEqual(object_id("death_desc"), object_id("DEATH_DESC"))
+
+    def test_linear_structure_used_to_find_it(self) -> None:
+        # Cambiar el bit k del último carácter hace siempre XOR con la misma constante
+        # desplazada k bits, sea cual sea el prefijo: así se dedujo el polinomio.
+        for prefix in ("", "x", "death/", "MoveStates"):
+            for k in range(7):
+                with self.subTest(prefix=prefix, k=k):
+                    delta = name_hash(prefix + chr(0x30)) ^ name_hash(prefix + chr(0x30 ^ (1 << k)))
+                    self.assertEqual(delta, 0x01A1561E0005800C << k)
+        # Y, como en todo CRC, con cadenas de igual longitud el XOR se conserva.
+        rng = random.Random(64)
+        for _ in range(50):
+            length = rng.randrange(1, 40)
+            a, b, c = (bytes(rng.randrange(1, 128) for _ in range(length)) for _ in range(3))
+            d = bytes(x ^ y ^ z for x, y, z in zip(a, b, c))
+            texts = [value.decode("ascii") for value in (a, b, c, d)]
+            self.assertEqual(name_hash(texts[0]) ^ name_hash(texts[1]) ^ name_hash(texts[2]), name_hash(texts[3]))
+
+
 class VerificationTests(unittest.TestCase):
     def test_synthetic_file_passes(self) -> None:
         report = verify_data(fixtures.make_obsp())
@@ -330,6 +408,23 @@ class VerificationTests(unittest.TestCase):
         # Rompe un BOD: cambia su firma.
         data[obsp.entries[0].offset] = ord("X")
         self.assertFalse(verify_data(bytes(data)).ok)
+
+    def failed_checks(self, data: bytes) -> list[str]:
+        return [check.label for check in verify_data(data).checks if not check.ok]
+
+    def test_wrong_hash_or_identity_fails(self) -> None:
+        entries, blobs, strings = fixtures.fixture_parts()
+        header = ObspFile.parse(fixtures.make_obsp()).header
+        wrong_id = [replace(entries[0], object_id=entries[0].object_id ^ 1)] + entries[1:]
+        self.assertEqual(
+            self.failed_checks(build_obsp(header, wrong_id, blobs, strings)),
+            ["idObjeto = hash del nombre en minúsculas"],
+        )
+        tree = fixtures.desc_document()
+        tree.root.fields[4].value = bod.HashedString(bod.Name(12345, "death_mesh_x"))
+        wrong_name = [bod.encode(tree)] + blobs[1:]
+        entries[0] = replace(entries[0], size=len(wrong_name[0]))
+        self.assertEqual(self.failed_checks(build_obsp(header, entries, wrong_name, strings)), ["Función de hash (CRC-64)"])
 
 
 if __name__ == "__main__":

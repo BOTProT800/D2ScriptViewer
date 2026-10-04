@@ -9,8 +9,9 @@ Secuencia de :func:`execute_save`:
    blobs sin cambios se copian tal cual y los modificados se recodifican; se
    regeneran tabla de cadenas, índice y cabecera.
 2. **Autoverificar**: se vuelve a parsear el resultado y se comprueba que tiene los
-   mismos objetos e identidades, que los blobs no modificados son idénticos y que
-   los modificados decodifican al árbol editado.
+   mismos objetos e identidades, que los blobs no modificados son idénticos, que
+   los modificados decodifican al árbol editado y que los hashes de la tabla de
+   cadenas y de los objetos modificados son los de sus textos.
 3. **Comprobar que el destino se puede escribir** (juego abierto, solo lectura, permisos).
 4. **Copia del original**: si no existe ``X.original.obsp``, se copia el archivo tal
    como está en disco, se verifica su SHA-256 y se marca de solo lectura. Si ya
@@ -37,6 +38,7 @@ from typing import Callable
 from .document import Document
 from .errors import D2ScriptViewerError, FormatError, SaveError
 from .formats import bod
+from .formats.hashes import document_names, first_wrong_name, name_hash
 from .formats.obsp import STEAM_ORIGINAL_SHA256, ObspFile
 from .validation import validate
 
@@ -182,13 +184,25 @@ def verify_plan(plan: SavePlan) -> None:
         if blob != expected:
             raise SaveError(f"El objeto {position} no contiene el árbol editado")
         try:
-            if bod.encode(bod.decode(blob)) != blob:
+            tree = bod.decode(blob)
+            if bod.encode(tree) != blob:
                 raise SaveError(f"El objeto editado {position} no se recodifica igual")
         except FormatError as error:
             raise SaveError(f"El objeto editado {position} no decodifica: {error}") from error
+        wrong = first_wrong_name(document_names(tree))
+        if wrong is not None:
+            raise SaveError(
+                f"El objeto editado {position} tiene la cadena «{wrong.text[:60]}» con un hash que no le "
+                f"corresponde ({wrong.hash:016X}; debería ser {name_hash(wrong.text):016X})"
+            )
     for value_hash, text in source.strings.items():
         if rebuilt.strings.get(value_hash, text) != text:
             raise SaveError("La tabla de cadenas cambió al construir el archivo")
+    for value_hash, text in rebuilt.strings.items():
+        if name_hash(text) != value_hash:
+            raise SaveError(
+                f"La tabla de cadenas tiene «{text[:60]}» con un hash que no le corresponde ({value_hash:016X})"
+            )
 
 
 # --- Escritura --------------------------------------------------------------------------------

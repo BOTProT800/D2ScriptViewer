@@ -24,7 +24,10 @@ archivo guardado por la herramienta, también con otro tamaño y los offsets rec
 restaurar devuelve el SHA de Steam (`research/PRUEBAS_EN_JUEGO.md`). Fase 5 (edición
 estructural) cerrada y validada en el juego: el juego tolera que se renumeren los objetos `07`
 de un BOD. Sus decisiones (tuplas fijas, nulos solo en huecos de objeto, qué bloquea y qué avisa
-al guardar) están al principio del plan. Las fases 6 a 9 quedan a elección del usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+al guardar) están al principio del plan. Fase 6: la función de hash está identificada (un
+CRC-64 reflejado, deducido de los datos) e implementada, y los valores `0F` admiten cadenas
+nuevas con aviso; falta la prueba en el juego para cerrarla. Después vienen las fases 7
+(scripts), 8 (exportación y parches) y 9 (distribución), en ese orden. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -43,12 +46,13 @@ python -m d2scriptviewer list --tipo Desc --clase Death --filtro death
 python -m d2scriptviewer show death/death_desc --profundidad 3
 python -m d2scriptviewer roundtrip --salida build\roundtrip.obsp
 python -m d2scriptviewer verify                             # comprobaciones del apéndice A
+python -m d2scriptviewer hash Death death/death_desc        # hash e idObjeto, sin archivo
 python -m unittest discover -s tests -v                     # todos los tests
 python -m unittest tests.<modulo>.<Clase>.<test>            # un solo test
 $env:D2SV_OBSP = 'C:\ruta\a\scripts.obsp'                   # archivo real para CLI y tests
 ```
 
-Los subcomandos leen `--archivo`, o `D2SV_OBSP`, o la ruta del juego. `roundtrip --salida` se
+Los subcomandos (salvo `hash`) leen `--archivo`, o `D2SV_OBSP`, o la ruta del juego. `roundtrip --salida` se
 niega a escribir encima de la entrada, de un archivo existente o de un `*.original.obsp`.
 
 La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
@@ -56,10 +60,13 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
 ## Mapa del código
 
 - `d2scriptviewer/formats/`: `obsp.py` (contenedor y escritor), `bod.py` (árbol, codificador
-  canónico, recorrido y presentación), `script.py` (cabecera de tipo 0), `hashes.py`.
+  canónico, recorrido y presentación), `script.py` (cabecera de tipo 0), `hashes.py`
+  (`name_hash`, el CRC-64 del juego; `object_id`; diccionario global con variantes de
+  mayúsculas y descuadres).
 - `document.py`: archivo abierto con decodificación bajo demanda y caché (`bod()` es seguro
   entre hilos: todos reciben el mismo árbol).
-- `edits.py`: validación del texto del usuario por tipo, avisos de identificador y operaciones
+- `edits.py`: validación del texto del usuario por tipo (`parse_name` admite cadenas nuevas con
+  su hash calculado), avisos de identificador y de cadena nueva, y operaciones
   reversibles (`ValueEdit`, `InsertItem`, `RemoveItem`, `MoveItem`, `ReplaceValue`,
   `ReplaceTree`, agrupadas en `EditGroup`). Las rutas valen porque deshacer y rehacer son LIFO.
 - `document.py`: un objeto está **modificado si sus bytes difieren** de los de partida; nada de
@@ -67,7 +74,8 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   actual con `baseline_tree()` mediante `diffing.py` (alineamiento por huellas y LCS).
 - `validation.py`: claves repetidas y `FC` sin destino bloquean `prepare_save`; los `*ID`
   repetidos nuevos avisan (listas alineadas con el diff, no por ruta).
-- `saving.py`: `prepare_save` (en el hilo de Tk) y `execute_save` (en un hilo): autoverificar,
+- `saving.py`: `prepare_save` (en el hilo de Tk) y `execute_save` (en un hilo): autoverificar
+  (también que los hashes de la tabla de cadenas y de los objetos modificados cuadran),
   comprobar que se puede escribir, copia del original, copia rotativa, `.tmp` + `fsync` +
   `os.replace` y relectura con SHA. `restore_original`, `file_status`, `cleanup_orphan_tmp`.
   `fail_at` permite a los tests simular fallos en cada paso.
@@ -80,7 +88,7 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   `script_view.py`, `search_view.py`, `theme.py`. Los hilos solo encolan mensajes;
   `_poll_messages` los atiende en el hilo de Tk. Las confirmaciones y avisos pasan por `app.ask`,
   `app.ask_save`, `app.inform` y `app.alert`, que los tests sustituyen.
-- `tests/fixtures.py`: OBSP sintético con los 11 tags; `tests/support.py`: archivo real;
+- `tests/fixtures.py`: OBSP sintético con los 11 tags y hashes reales; `tests/support.py`: archivo real;
   `tests/test_gui.py`: humo de la GUI (se omite sin Tk).
 - `research/FORMATO.md`: hallazgos de formato fuera del apéndice A.
 
@@ -121,8 +129,11 @@ encuentran.
   después un bytecode de pila con los nombres y los números de línea en línea. La estructura
   del cuerpo está sin formalizar, así que se tratan como bytes opacos de solo lectura hasta
   la fase 7.
-- **Hash de 64 bits**: la función es desconocida. Distingue mayúsculas de minúsculas y es la
-  misma en el contenedor, los BOD y los scripts. Lo ya descartado está en la sección 2.4 del plan.
+- **Hash de 64 bits** (apéndice A.4 del plan): CRC-64 reflejado con polinomio
+  `0x0060034000F0D50B` (reflejado `0xD0AB0F0002C00600`) y valor inicial y XOR final `~0`, sobre
+  los bytes de la cadena. Distingue mayúsculas, da 0 para la cadena vacía y es la misma en el
+  contenedor, los BOD y los scripts. `idObjeto` es el hash del nombre en minúsculas. Los enteros
+  de 32 bits con aspecto de hash usan otra función, todavía desconocida.
 
 ### Flujo de la aplicación (sección 5 del plan)
 
@@ -146,8 +157,10 @@ encuentran.
 - **Copia del original.** Al guardar encima de `X.obsp` se crea `X.original.obsp` una sola vez:
   es la copia del archivo tal como estaba, verificada por SHA-256 y en solo lectura. Nunca se
   sobrescribe ni se borra, y no se permite guardar encima de un `*.original.obsp`.
-- **No crear cadenas nuevas con hash** hasta resolver la función (fase 6). Solo se admiten
-  cadenas ya presentes en el archivo (hay 70 182 pares hash↔cadena) o cadenas sin hash (tag `05`).
+- **Todo hash es el de su texto** (`hashes.name_hash`): guardar se bloquea si no cuadra. Las
+  cadenas con hash nuevas solo entran en valores `0F`, con confirmación del usuario. Los nombres
+  de campo y de clase, y las rutas, nombres e identidades de los objetos, no se editan (las
+  identidades nuevas quedaron fuera de la fase 6).
 - Las cadenas son solo ASCII (el original no tiene ninguna que no lo sea) y su longitud cabe en u16.
 - No se escribe en la instalación del juego fuera del guardado explícito. Los experimentos
   se hacen sobre copias.

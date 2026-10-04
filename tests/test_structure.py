@@ -15,6 +15,7 @@ from d2scriptviewer.document import Document
 from d2scriptviewer.edits import EditGroup, ReplaceValue
 from d2scriptviewer.errors import EditError, SaveError
 from d2scriptviewer.formats import bod
+from d2scriptviewer.formats.hashes import name_hash, object_id
 from d2scriptviewer.formats.obsp import IndexEntry, ObspFile, ObspHeader, build_obsp
 from d2scriptviewer.references import build_indexes, slot_key, slot_occurrences
 from d2scriptviewer.validation import validate
@@ -26,9 +27,9 @@ from tests.support import ORIGINAL_SHA256, real_bytes, requires_real_file
 def make_single_object_document(tree: bod.BodDocument) -> Document:
     """Un OBSP con un único objeto de tipo 8 cuyo árbol es ``tree``."""
     blob = bod.encode(tree)
-    strings = {fixtures.fake_hash(text): text for text in ("test/table", "Table", "", "Table")}
-    entry = IndexEntry(fixtures.fake_hash("test/table"), 0x99, 0, len(blob), fixtures.GROUP, 8,
-                       fixtures.fake_hash("Table"), 0, fixtures.fake_hash("Table"))
+    strings = {name_hash(text): text for text in ("test/table", "Table", "", "Table")}
+    entry = IndexEntry(name_hash("test/table"), object_id("Table"), 0, len(blob), fixtures.GROUP, 8,
+                       name_hash("Table"), 0, name_hash("Table"))
     header = ObspHeader(10, 1, 0, 0, 0, 0)
     return Document.from_bytes(build_obsp(header, [entry], [blob], strings))
 

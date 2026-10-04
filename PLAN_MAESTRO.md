@@ -1,5 +1,44 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 6: función de hash identificada (2026-10-04)** solo con los datos del archivo, en el
+> paso de análisis y sin vías externas (ni código ajeno, ni Ghidra, ni la DLL):
+>
+> - Es un **CRC-64 reflejado** con polinomio `0x0060034000F0D50B` (`0xD0AB0F0002C00600` en forma
+>   reflejada) y valor inicial y XOR final `0xFFFFFFFFFFFFFFFF`, sobre los bytes de la cadena.
+>   Valor de control: `"123456789"` → `9AFB180E4C211BB4`. No es ninguno de los CRC-64 habituales
+>   (ECMA, ISO, Jones), y por eso no apareció entre lo descartado en 2.4.
+> - **Cómo se dedujo:** cambiar el bit k del último carácter hace siempre XOR con
+>   `0x01A1561E0005800C << k`, sea cual sea el resto de la cadena. Los cambios del penúltimo
+>   carácter se propagan como en un CRC reflejado, y de ahí sale el polinomio. Con él, el resto
+>   depende solo de la longitud, y de eso salen el valor inicial y el XOR final.
+> - **Comprobado:** acierta los 70 182 pares y `hashRuta` en los 7 862 objetos. `idObjeto` es el
+>   hash del nombre en minúsculas en **los 7 862** (antes solo se podían comprobar 4 835).
+> - **No explica** los enteros de 32 bits con aspecto de hash (`OnStateOne`, `MeshID`…): ni sus
+>   mitades ni el CRC-32 coinciden más de lo que daría el azar. Queda abierto (sección 2.4).
+>
+> Decisiones de la fase 6, confirmadas por el usuario:
+>
+> - **Cadenas nuevas en valores `0F`:** se admiten, con aviso. Vale cualquier texto ASCII sin
+>   NUL de hasta 65 535 caracteres, y su hash se calcula. Si el texto no aparece en el archivo, se
+>   avisa y se pide confirmación, con un aviso específico si solo difiere en mayúsculas de una
+>   cadena conocida. Una colisión con otra cadena conocida da error. El autocompletado sigue
+>   ofreciendo las conocidas.
+> - **Identidades nuevas en el índice OBSP** (renombrar o duplicar objetos): fuera de la fase 6.
+>   Si se abordan, será en una fase aparte con su propia prueba en el juego.
+> - **Un hash que no cuadra con su texto** impide guardar. Lo comprueba la autoverificación del
+>   guardado en la tabla de cadenas y en los objetos modificados, que son los únicos que puede
+>   cambiar la herramienta: los demás son idénticos byte a byte al archivo abierto. `verify` lo
+>   comprueba en todo el archivo.
+> - **Prueba en el juego:** cambiar un `0F` que nombra un recurso de fuera de `scripts.obsp`
+>   (p. ej. un `AnimationName`) por un nombre que esté en los `.upak` pero no en `scripts.obsp`,
+>   buscado en solo lectura con Darkstractor.
+> - **Decisiones menores**, aceptadas sin cambios: los nombres de campo y de clase siguen sin
+>   editarse; se añade `python -m d2scriptviewer hash <texto>`, y el editor de `0F` muestra como
+>   pista el hash de lo que se escribe; no se añade entrada en `CREDITS.md`, porque el CRC es un
+>   algoritmo de manual implementado aquí con parámetros deducidos de los datos.
+>
+> Criterios de «Hecho cuando» en la sección 7.
+>
 > **Fase 5 cerrada (2026-10-04)** con la prueba en el juego (detalle en
 > `research/PRUEBAS_EN_JUEGO.md`). El usuario duplicó `MoveStates[0]` de
 > `death/playercommon_movestates` (+3 objetos `07`; el estado «Jump» pasa del índice interno 585 al
@@ -274,13 +313,18 @@ cadenas **nuevas** (falta la función de hash).
 
 ### 2.4 Lo que todavía no se conoce
 
-- **Función de hash de 64 bits.** Distingue mayúsculas de minúsculas. Ya descartados:
+- ~~**Función de hash de 64 bits.**~~ **Resuelta el 2026-10-04 (fase 6):** CRC-64 reflejado con
+  polinomio `0x0060034000F0D50B`, apéndice A.4. Se descartaron antes:
   - FNV-1 y FNV-1a 64, también en minúsculas, con NUL y en UTF-16.
-  - CRC-64 ECMA, ISO y Jones (reflejados o no, con init/xorout 0 o ~0).
+  - CRC-64 ECMA, ISO y Jones (reflejados o no, con init/xorout 0 o ~0). La estructura de CRC era
+    correcta, pero el polinomio no es ninguno de los habituales.
   - Multiplicativos comunes (31, 33, 65599…).
   - Mitades de 32 bits con CRC32, FNV-32, djb2 o sdbm.
 
   El FNV-1 64 que contiene el ejecutable pasa la cadena a minúsculas antes de hashear, así que no es este.
+- **Los enteros de 32 bits con aspecto de hash** (p. ej. `OnStateOne = 0x4DFA84A3`, `MeshID`): no
+  son ninguna de las dos mitades del CRC-64 ni el CRC-32 de las cadenas conocidas (ni sus
+  minúsculas); solo hay coincidencias al azar. La función sigue sin conocerse.
 - El campo de la cabecera OBSP que vale `1` y el `u16 = 1` de la cabecera BOD.
 - La semántica de muchos enteros: algunos son IDs o hashes de 32 bits (p. ej. `OnStateOne = 0x4DFA84A3`).
 - El juego de opcodes completo del bytecode.
@@ -449,7 +493,7 @@ Editores por tipo de valor:
 | 03 float32 | Entrada; muestra el valor ya redondeado a float32 | 3 |
 | 04 bool | Casilla | 3 |
 | 05 cadena sin hash | Texto libre ASCII (≤ 65 535) | 3 |
-| 0F cadena con hash | Autocompletado entre las 70 182 cadenas conocidas; texto libre al resolver el hash | 3 / 6 |
+| 0F cadena con hash | Autocompletado entre las 70 182 cadenas conocidas; texto libre con el hash calculado y confirmación (fase 6) | 3 / 6 |
 | FC referencia | Selector de objetos del índice; navegable | 3 |
 | 09 / 0A contenedores | Duplicar, eliminar y reordenar elementos | 5 |
 | 0B tupla | Solo sus valores: es de tamaño fijo (decisión del 2026-10-04) | 3 |
@@ -546,6 +590,22 @@ edición, y la copia del original es idéntica al archivo previo.
   - **Instrumentación** con Darksiders2DLL, registrando pares cadena → hash en tiempo de ejecución.
 - Resultado: `hashes.py` con la función y sus tests. Habilita cadenas nuevas y renombrados.
 
+**Hecho cuando** (fijado el 2026-10-04 con el usuario, tras identificar la función):
+
+- `formats/hashes.py` calcula el hash, con sus parámetros documentados en el apéndice A. Con el
+  archivo real, los tests comprueban los 70 182 pares y `idObjeto` y `hashRuta` de los 7 862
+  objetos. Los tests sintéticos de la CI cubren el valor de control, la cadena vacía = 0 y que
+  distingue mayúsculas, y los fixtures se generan con hashes reales;
+- `verify` comprueba la función en todos los pares y que `idObjeto` es el hash del nombre en
+  minúsculas, y guardar se bloquea si un hash no cuadra con su texto;
+- los valores `0F` admiten cadenas nuevas con aviso y confirmación (decisiones de arriba);
+  editar y deshacer devuelve `B46DD3DA…`, y el archivo guardado pasa `verify`;
+- `python -m d2scriptviewer hash <texto>` y la pista del hash en el editor;
+- están actualizados la sección 2.4, el apéndice A, `research/FORMATO.md`, `CLAUDE.md` (la
+  regla de no crear cadenas con hash se levanta) y `CHANGELOG.md`;
+- el juego carga un archivo con una cadena nueva y refleja su efecto (punto de control con el
+  usuario); restaurar devuelve `B46DD3DA…`.
+
 ### Fase 7 — Scripts compilados
 
 1. Formalizar la estructura del cuerpo: tablas de miembros y funciones, rangos de código.
@@ -605,7 +665,7 @@ edición, y la copia del original es idéntica al archivo previo.
 
 | Riesgo | Mitigación |
 |---|---|
-| Función de hash desconocida | Editar solo cadenas ya conocidas o sin hash (tag 05) hasta la fase 6 |
+| Función de hash desconocida | Resuelto en la fase 6 (CRC-64, apéndice A.4). Una cadena nueva pide confirmación porque el juego solo la reconoce si existe algo con ese nombre |
 | Semántica desconocida de algunos valores (IDs, hashes, enums) | Mostrar el dato crudo, avisar en campos tipo ID, hacer cambios pequeños y probarlos en el juego |
 | El juego valida algo que no vemos | No hay checksum aparente en la cabecera; pasos 1 y 2 del protocolo de la fase 4 |
 | Otro archivo depende de offsets del `.obsp` (improbable) | Paso 2 del protocolo (cambio de tamaño) |
@@ -654,8 +714,8 @@ Confirmadas por el usuario el 3 de octubre de 2026:
 > formato `.obsp`, creando antes `scripts.original.obsp` (una sola vez,
 > verificada, nunca sobrescrita). Exportar a JSON es secundario. El formato
 > está en el apéndice A de `PLAN_MAESTRO.md`: el contenedor y los 4 172 objetos
-> BOD se reconstruyen byte a byte; la función de hash de 64 bits sigue sin
-> identificarse. Proyectos relacionados: Darksiders2DLL (C++, proxy `dinput8.dll`;
+> BOD se reconstruyen byte a byte; la función de hash de 64 bits es un CRC-64 con
+> polinomio propio (apéndice A.4). Proyectos relacionados: Darksiders2DLL (C++, proxy `dinput8.dll`;
 > no toca `scripts.obsp`) y Darkstractor (Python, mismo estilo).
 > Consulta la sección 7 para saber en qué fase está el proyecto.
 
@@ -671,8 +731,8 @@ de `CLAUDE.md`.
 
 ## Apéndice A — Especificación verificada
 
-Todos los enteros son little-endian. Los "hash" son u64 de la función desconocida,
-salvo el 0, que corresponde a la cadena vacía.
+Todos los enteros son little-endian. Los "hash" son u64 de la función del apéndice A.4;
+la cadena vacía tiene hash 0.
 
 ### A.1 Contenedor OBSP
 
@@ -794,6 +854,26 @@ u32 grupo      (= el del índice)
 | `0x29` | ¿asignación? | |
 | `0x32` | ¿fin de sentencia? | |
 | `0x2F` | ¿fin de función? | |
+
+### A.4 Función de hash de 64 bits
+
+Identificada el 2026-10-04 (fase 6) a partir de los 70 182 pares del archivo y comprobada en
+todos ellos:
+
+```text
+CRC-64 reflejado (entrada y salida reflejadas), sobre los bytes de la cadena, sin NUL final
+polinomio      0x0060034000F0D50B   (forma reflejada 0xD0AB0F0002C00600)
+valor inicial  0xFFFFFFFFFFFFFFFF
+XOR final      0xFFFFFFFFFFFFFFFF
+control        "123456789" → 0x9AFB180E4C211BB4;  "" → 0
+```
+
+- Distingue mayúsculas y es la misma en la tabla de cadenas del contenedor, en las tablas de
+  nombres de los BOD y en los símbolos de los scripts.
+- `idObjeto` = hash del nombre en minúsculas (`death/death`, nombre `Death` → hash de `death`
+  = `8C882C7C958E9802`), en los 7 862 objetos. `hashRuta`, `hashNombre`, `hashCarpeta` y
+  `hashClase` son los hashes de sus textos.
+- Cómo se dedujo, en `research/FORMATO.md`.
 
 ## Apéndice B — Interacción con Darksiders2DLL
 

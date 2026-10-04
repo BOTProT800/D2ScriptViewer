@@ -301,8 +301,8 @@ class PropertyView(ttk.Frame):
         elif isinstance(node, bod.ExternalRef):
             self.set_hint("Doble clic o Intro para ir al destino · F2 para cambiar la referencia" + structure)
         elif isinstance(node, bod.HashedString):
-            self.set_hint("F2 o doble clic para elegir otra cadena ya presente en el archivo (distingue mayúsculas)"
-                          + structure)
+            self.set_hint("F2 o doble clic para cambiar la cadena: sugiere las del archivo y admite nuevas"
+                          " (distingue mayúsculas)" + structure)
         elif edits.is_editable(node):
             self.set_hint("Doble clic o F2 para editar" + structure)
         elif structure:

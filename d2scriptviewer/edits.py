@@ -12,13 +12,14 @@ Tag        Nodo                           Estado
 ``03``     :class:`~.bod.Float32`         4 bytes crudos
 ``04``     :class:`~.bod.Bool`            byte crudo
 ``05``     :class:`~.bod.RawString`       texto ASCII
-``0F``     :class:`~.bod.HashedString`    :class:`~.bod.Name` ya conocido
+``0F``     :class:`~.bod.HashedString`    :class:`~.bod.Name` (conocido o nuevo)
 ``FC``     :class:`~.bod.ExternalRef`     identidad (grupo, idObjeto)
 ========== ============================== ==============================
 
-Las cadenas con hash solo admiten textos que ya aparecen en el archivo: la
-función de hash es desconocida (fase 6). Cambiar el tipo de un valor, poner
-nulos o tocar contenedores es la fase 5.
+Una cadena con hash puede ser una ya presente en el archivo o una nueva, cuyo
+hash se calcula (fase 6); las nuevas piden confirmación porque el juego solo
+las reconocerá si existe algo con ese nombre. Poner nulos y tocar contenedores
+son las operaciones estructurales del final del módulo (fase 5).
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from .binary import F32, I32, U32
 from .errors import EditError
 from .formats import bod
 from .formats.bod import Name
-from .formats.hashes import HashDictionary
+from .formats.hashes import HashDictionary, name_hash
 from .formats.obsp import identity_text
 
 EDITABLE_TYPES = (bod.Int32, bod.Float32, bod.Bool, bod.RawString, bod.HashedString, bod.ExternalRef)
@@ -161,17 +162,45 @@ def parse_raw_string(text: str) -> str:
     return text
 
 
-def parse_known_name(text: str, dictionary: HashDictionary | None) -> Name:
+def parse_name(text: str, dictionary: HashDictionary | None) -> Name:
+    """Cadena con hash: la del archivo si ya aparece; si no, una nueva con su hash calculado.
+
+    Hace falta el diccionario para saber si es nueva y para descartar colisiones.
+    """
     if dictionary is None:
         raise EditError("Aún se está construyendo el diccionario de cadenas; espera unos segundos")
     name = dictionary.name_for(text)
-    if name is None:
-        close = [known for known in suggestions(dictionary, text, limit=1)]
-        hint = f" ¿Querías decir «{close[0]}»?" if close else ""
+    if name is not None:
+        return name
+    parse_raw_string(text)
+    value_hash = name_hash(text)
+    other = dictionary.text(value_hash)
+    if other is not None:
         raise EditError(
-            f"«{text}» no aparece en el archivo, así que no se conoce su hash (distingue mayúsculas).{hint}"
+            f"«{text}» tiene el mismo hash ({value_hash:016X}) que «{other}», que ya está en el archivo: "
+            "el juego no podría distinguirlas"
         )
-    return name
+    return Name(value_hash, text)
+
+
+def is_new_name(name: Name, dictionary: HashDictionary | None) -> bool:
+    return dictionary is not None and name.hash not in dictionary
+
+
+def new_name_warning(name: Name, dictionary: HashDictionary | None) -> str | None:
+    """Aviso para una cadena con hash que no aparece en el archivo (``None`` si ya aparece)."""
+    if not is_new_name(name, dictionary):
+        return None
+    assert dictionary is not None
+    message = (
+        f"«{name.text}» no aparece en el archivo: es una cadena nueva (hash {name.hash:016X}). "
+        "El juego solo la reconocerá si existe algo con ese nombre, como un recurso o una animación."
+    )
+    variants = dictionary.case_variants(name.text)
+    if variants:
+        shown = ", ".join(f"«{value}»" for value in variants[:3])
+        message += f" Ojo: en el archivo está {shown}, que solo difiere en mayúsculas, y el hash las distingue."
+    return message
 
 
 def parse_state(node: object, text: str, dictionary: HashDictionary | None = None) -> State:
@@ -185,7 +214,7 @@ def parse_state(node: object, text: str, dictionary: HashDictionary | None = Non
     if isinstance(node, bod.RawString):
         return parse_raw_string(text)
     if isinstance(node, bod.HashedString):
-        return parse_known_name(text, dictionary)
+        return parse_name(text, dictionary)
     raise EditError(f"Los valores de tipo {bod.type_text(node)} no se editan escribiendo")
 
 
@@ -218,7 +247,11 @@ def input_hint(node: object, text: str, dictionary: HashDictionary | None = None
     if isinstance(node, bod.RawString):
         return True, f"{len(state):,} caracteres ASCII (antes {len(node.text):,})"  # type: ignore[arg-type]
     if isinstance(node, bod.HashedString):
-        return True, f"Cadena conocida · hash {state.hash:016X}"  # type: ignore[union-attr]
+        if not is_new_name(state, dictionary):  # type: ignore[arg-type]
+            return True, f"Cadena conocida · hash {state.hash:016X}"  # type: ignore[union-attr]
+        variants = dictionary.case_variants(state.text) if dictionary else []  # type: ignore[union-attr]
+        note = f" · ojo: existe «{variants[0]}»" if variants else ""
+        return True, f"Cadena nueva, no aparece en el archivo · hash {state.hash:016X}{note}"  # type: ignore[union-attr]
     return True, ""
 
 

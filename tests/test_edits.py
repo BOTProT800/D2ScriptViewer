@@ -13,7 +13,7 @@ from d2scriptviewer import edits
 from d2scriptviewer.document import Document
 from d2scriptviewer.errors import EditError
 from d2scriptviewer.formats import bod
-from d2scriptviewer.formats.hashes import HashDictionary
+from d2scriptviewer.formats.hashes import HashDictionary, name_hash
 from d2scriptviewer.formats.obsp import ObspFile
 from d2scriptviewer.references import build_indexes
 from tests import fixtures
@@ -64,15 +64,43 @@ class ParseTests(unittest.TestCase):
             with self.subTest(bad=bad[:5]), self.assertRaises(EditError):
                 edits.parse_raw_string(bad)
 
-    def test_known_names(self) -> None:
+    def test_hashed_names(self) -> None:
         dictionary = HashDictionary()
-        dictionary.update([(1, "Death_Light_Material"), (2, "death_mesh")])
-        self.assertEqual(edits.parse_known_name("death_mesh", dictionary), bod.Name(2, "death_mesh"))
-        with self.assertRaises(EditError) as raised:
-            edits.parse_known_name("Death_Mesh", dictionary)  # distingue mayúsculas
-        self.assertIn("death_mesh", str(raised.exception))
+        dictionary.update((name_hash(text), text) for text in ("Death_Light_Material", "death_mesh"))
+        known = edits.parse_name("death_mesh", dictionary)
+        self.assertEqual(known, N("death_mesh"))
+        self.assertFalse(edits.is_new_name(known, dictionary))
+        self.assertIsNone(edits.new_name_warning(known, dictionary))
+        # Una cadena nueva lleva su hash calculado y avisa; distingue mayúsculas.
+        new = edits.parse_name("Death_Mesh", dictionary)
+        self.assertEqual(new, bod.Name(name_hash("Death_Mesh"), "Death_Mesh"))
+        self.assertTrue(edits.is_new_name(new, dictionary))
+        warning = edits.new_name_warning(new, dictionary)
+        self.assertIn("cadena nueva", warning)
+        self.assertIn("«death_mesh»", warning)  # la variante de mayúsculas
+        self.assertNotIn("Ojo", edits.new_name_warning(edits.parse_name("fire_mesh", dictionary), dictionary))
+        for bad in ("x" * 65536, "año", "a\x00b"):
+            with self.subTest(bad=bad[:5]), self.assertRaises(EditError):
+                edits.parse_name(bad, dictionary)
         with self.assertRaises(EditError):
-            edits.parse_known_name("death_mesh", None)
+            edits.parse_name("death_mesh", None)
+
+    def test_hash_collision_is_rejected(self) -> None:
+        dictionary = HashDictionary()
+        dictionary.add(name_hash("nuevo"), "otra")  # inventado: «otra» con el hash de «nuevo»
+        with self.assertRaises(EditError) as raised:
+            edits.parse_name("nuevo", dictionary)
+        self.assertIn("«otra»", str(raised.exception))
+
+    def test_hint_shows_the_hash(self) -> None:
+        dictionary = HashDictionary()
+        dictionary.update((name_hash(text), text) for text in ("Jump",))
+        node = bod.HashedString(N("Jump"))
+        self.assertEqual(edits.input_hint(node, "Jump", dictionary), (True, f"Cadena conocida · hash {name_hash('Jump'):016X}"))
+        valid, message = edits.input_hint(node, "jump", dictionary)
+        self.assertTrue(valid)
+        self.assertIn(f"Cadena nueva, no aparece en el archivo · hash {name_hash('jump'):016X}", message)
+        self.assertIn("«Jump»", message)
 
     def test_suggestions_put_prefixes_first(self) -> None:
         dictionary = HashDictionary()
@@ -241,7 +269,7 @@ class DocumentEditTests(unittest.TestCase):
         self.assertEqual(self.document.modified_positions, {self.desc, instance})
 
     def test_invalid_edits_change_nothing(self) -> None:
-        for label, text in (("Health", "9999999999"), ("Speed", "nan"), ("Comment", "ñ"), ("Mesh", "no_existe")):
+        for label, text in (("Health", "9999999999"), ("Speed", "nan"), ("Comment", "ñ"), ("Mesh", "señal")):
             with self.subTest(label=label), self.assertRaises(EditError):
                 self.document.edit_text(self.desc, self.path(label), text, self.dictionary)
         with self.assertRaises(EditError):
@@ -315,6 +343,22 @@ class RealEditTests(unittest.TestCase):
         self.assertEqual(bod.resolve(decoded, name_path).name.text, "Death")
         self.assertEqual(bod.resolve(decoded, ref_path).identity, other)
         self.document.undo()
+        self.document.undo()
+        self.assertEqual(hashlib.sha256(self.document.current_data()).hexdigest().upper(), ORIGINAL_SHA256)
+
+    def test_new_hashed_string_and_undo_restores_sha(self) -> None:
+        dictionary = build_indexes(self.document.obsp).dictionary
+        position = self.document.find("death/playercommon_movestates")[0].position
+        tree = self.document.bod(position)
+        path = path_of(tree, "MoveStates[44].Name")
+        self.assertEqual(bod.resolve(tree, path).name.text, "Jump")
+        self.assertIsNone(dictionary.name_for("Jump_d2sv"))
+        self.document.edit_text(position, path, "Jump_d2sv", dictionary)
+        blob = self.document.blob(position)
+        # «Jump» solo aparecía ahí: su definición en la tabla del BOD pasa a ser la de la cadena nueva.
+        self.assertEqual(len(blob), len(self.document.obsp.blob(position)) + len("_d2sv"))
+        decoded = bod.decode(blob)
+        self.assertEqual(bod.resolve(decoded, path).name, bod.Name(name_hash("Jump_d2sv"), "Jump_d2sv"))
         self.document.undo()
         self.assertEqual(hashlib.sha256(self.document.current_data()).hexdigest().upper(), ORIGINAL_SHA256)
 

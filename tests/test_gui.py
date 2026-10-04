@@ -15,6 +15,7 @@ import unittest
 
 from d2scriptviewer.document import Document
 from d2scriptviewer.formats import bod
+from d2scriptviewer.formats.hashes import name_hash
 from tests import fixtures
 from tests.support import REAL_OBSP, TempDirMixin, requires_real_file
 
@@ -215,7 +216,7 @@ class EditingGuiTests(TempDirMixin, unittest.TestCase):
         self.view.cancel_edit()
         self.assertEqual(self.document.change_count, 0)
 
-    def test_bool_and_known_name_editors(self) -> None:
+    def test_bool_and_name_editors(self) -> None:
         self.type_into_editor("Visible", "false")
         self.assertEqual(self.view.tree.item(self.row("Visible"), "values"), ("bool", "false"))
         self.row("Mesh")
@@ -226,9 +227,23 @@ class EditingGuiTests(TempDirMixin, unittest.TestCase):
         self.view.editor.var.set("fire")
         self.view.editor.commit()
         self.assertEqual(self.view.tree.item(self.row("Mesh"), "values"), ("nombre", "fire"))
-        self.type_into_editor("Mesh", "Fire")  # distingue mayúsculas: no existe
-        self.assertTrue(self.view.editing)
-        self.view.cancel_edit()
+        self.assertEqual(self.questions, [])
+        # «Fire» no aparece en el archivo (distingue mayúsculas): es una cadena nueva y pide confirmación.
+        self.row("Mesh")
+        self.view.begin_edit()
+        self.view.editor.var.set("Fire")
+        self.assertIn("Cadena nueva", self.view.hint_var.get())
+        self.assertIn(f"{name_hash('Fire'):016X}", self.view.hint_var.get())
+        self.answer = False
+        self.view.editor.commit()
+        self.assertEqual(len(self.questions), 1)
+        self.assertIn("cadena nueva", self.questions[0])
+        self.assertIn("«fire»", self.questions[0])
+        self.assertEqual(self.view.tree.item(self.row("Mesh"), "values"), ("nombre", "fire"))
+        self.answer = True
+        self.type_into_editor("Mesh", "Fire")
+        self.assertEqual(self.view.tree.item(self.row("Mesh"), "values"), ("nombre", "Fire"))
+        self.assertEqual(len(self.questions), 2)
 
     def test_identifier_fields_ask_first(self) -> None:
         self.answer = False

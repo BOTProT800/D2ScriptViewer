@@ -10,6 +10,7 @@ import unittest
 
 from d2scriptviewer.binary import hex_dump
 from d2scriptviewer.document import Document
+from d2scriptviewer.formats.hashes import name_hash
 from d2scriptviewer.references import Cancelled, Reference, ReferenceIndex, build_indexes, references_in
 from d2scriptviewer.search import SearchOptions, search
 from tests import fixtures
@@ -56,8 +57,8 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual([(ref.label, ref.target) for ref in outgoing], [("Behavior", (fixtures.SCRIPT_GROUP, fixtures.INSTANCE_ID))])
         incoming = indexes.references.references_to((fixtures.GROUP, fixtures.DESC_ID))
         self.assertEqual([(ref.source, ref.label) for ref in incoming], [(1, "Owner")])
-        self.assertEqual(indexes.dictionary.text(fixtures.fake_hash("death_mesh")), "death_mesh")
-        self.assertEqual(indexes.dictionary.text(fixtures.fake_hash("NumSlots")), "NumSlots")
+        self.assertEqual(indexes.dictionary.text(name_hash("death_mesh")), "death_mesh")
+        self.assertEqual(indexes.dictionary.text(name_hash("NumSlots")), "NumSlots")
 
     def test_set_object_replaces_old_references(self) -> None:
         index = ReferenceIndex()

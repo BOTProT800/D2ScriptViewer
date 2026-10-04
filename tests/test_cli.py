@@ -10,6 +10,7 @@ import io
 import unittest
 
 from d2scriptviewer.cli import main
+from d2scriptviewer.formats.hashes import name_hash
 from tests import fixtures
 from tests.support import REAL_OBSP, TempDirMixin, requires_real_file
 
@@ -88,6 +89,15 @@ class CliTests(TempDirMixin, unittest.TestCase):
         code, _out, err = run("info", "--archivo", str(self.folder / "nope.obsp"))
         self.assertEqual(code, 2)
         self.assertIn("No existe", err)
+
+    def test_hash_needs_no_file(self) -> None:
+        code, out, _err = run("hash", "123456789", "Death")
+        self.assertEqual(code, 0, out)
+        self.assertIn("9AFB180E4C211BB4  9AFB180E4C211BB4  123456789", out)
+        self.assertIn(f"{name_hash('Death'):016X}  {name_hash('death'):016X}  Death", out)
+        code, _out, err = run("hash", "año")
+        self.assertEqual(code, 2)
+        self.assertIn("ASCII", err)
 
 
 @requires_real_file

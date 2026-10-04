@@ -17,7 +17,10 @@ from d2scriptviewer import saving
 from d2scriptviewer.document import Document
 from d2scriptviewer.errors import SaveError
 from d2scriptviewer.formats import bod
+from d2scriptviewer.formats.hashes import name_hash
 from d2scriptviewer.formats.obsp import STEAM_ORIGINAL_SHA256
+from d2scriptviewer.references import build_indexes
+from d2scriptviewer.verification import verify_data
 from tests import fixtures
 from tests.support import ORIGINAL_SHA256, REAL_OBSP, TempDirMixin, requires_real_file
 
@@ -126,6 +129,27 @@ class SavingTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), self.original_bytes)
         self.assertFalse(self.copy_path().exists())
         self.assertFalse((self.folder / saving.BACKUP_DIR).exists())
+
+    def test_wrong_hash_blocks_saving(self) -> None:
+        tree = self.document.bod(self.desc)
+        self.document.edit(self.desc, label_path(tree, "Mesh"), bod.Name(12345, "inventada"))
+        with self.assertRaises(SaveError) as raised:
+            saving.save_document(self.document)
+        self.assertIn("«inventada»", str(raised.exception))
+        self.assertIn(f"{name_hash('inventada'):016X}", str(raised.exception))
+        self.assertEqual(self.target.read_bytes(), self.original_bytes)
+        self.assertFalse(self.copy_path().exists())
+        self.assertFalse((self.folder / saving.BACKUP_DIR).exists())
+
+    def test_new_hashed_string_is_saved(self) -> None:
+        dictionary = build_indexes(self.document.obsp).dictionary
+        tree = self.document.bod(self.desc)
+        self.document.edit_text(self.desc, label_path(tree, "Mesh"), "Mesh_Nueva", dictionary)
+        saving.save_document(self.document)
+        report = verify_data(self.target.read_bytes())
+        self.assertTrue(report.ok, [check for check in report.checks if not check.ok])
+        reopened = Document.open(self.target).bod(self.desc)
+        self.assertEqual(bod.resolve(reopened, label_path(reopened, "Mesh")).name, bod.Name(name_hash("Mesh_Nueva"), "Mesh_Nueva"))
 
     def test_read_only_target(self) -> None:
         self.edit("Health", "5")
@@ -284,6 +308,23 @@ class RealSavingTests(TempDirMixin, unittest.TestCase):
         restored = saving.restore_original(self.target)
         self.assertTrue(restored.is_steam)
         self.assertEqual(saving.sha256(self.target.read_bytes()), ORIGINAL_SHA256)
+
+    def test_new_hashed_string_saves_and_verifies(self) -> None:
+        document = Document.open(self.target)
+        dictionary = build_indexes(document.obsp).dictionary
+        position = document.find("death/playercommon_movestates")[0].position
+        tree = document.bod(position)
+        path = label_path(tree, "MoveStates[44].Name")
+        document.edit_text(position, path, "Jump_d2sv", dictionary)
+        result = saving.save_document(document)
+        self.assertEqual(self.target.stat().st_size, 18_334_463 + len("_d2sv"))
+        report = verify_data(self.target.read_bytes())
+        self.assertTrue(report.ok, [check for check in report.checks if not check.ok])
+        saved = build_indexes(Document.open(self.target).obsp).dictionary
+        self.assertEqual(saved.hash_of("Jump_d2sv"), name_hash("Jump_d2sv"))
+        self.assertEqual(saving.file_status(self.target, result.sha256).kind, "modified")
+        restored = saving.restore_original(self.target)
+        self.assertTrue(restored.is_steam)
 
     def test_saving_without_net_changes_keeps_the_sha(self) -> None:
         document = Document.open(self.target)
