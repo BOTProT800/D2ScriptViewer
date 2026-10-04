@@ -9,9 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from .. import edits
 from ..document import Document
-from ..formats import bod
 from ..wording import count
 from . import theme
 
@@ -42,20 +40,20 @@ class PendingChangesWindow(tk.Toplevel):
         frame, self.tree = theme.scrolled(
             self,
             lambda parent: ttk.Treeview(
-                parent, columns=("property", "type", "before", "after"), show="tree headings", selectmode="browse"
+                parent, columns=("property", "kind", "before", "after"), show="tree headings", selectmode="browse"
             ),
         )
         frame.pack(fill="both", expand=True, padx=14)
         self.tree.heading("#0", text="Objeto")
-        self.tree.column("#0", width=250)
+        self.tree.column("#0", width=230)
         for column, heading, width in (
             ("property", "Propiedad", 230),
-            ("type", "Tipo", 70),
+            ("kind", "Cambio", 90),
             ("before", "Antes", 190),
             ("after", "Después", 190),
         ):
             self.tree.heading(column, text=heading)
-            self.tree.column(column, width=width, stretch=column != "type")
+            self.tree.column(column, width=width, stretch=column != "kind")
         self.tree.tag_configure("object", foreground=theme.MODIFIED)
         self.tree.bind("<Double-1>", lambda _event: self._go())
         self.tree.bind("<Return>", lambda _event: self._go())
@@ -71,29 +69,20 @@ class PendingChangesWindow(tk.Toplevel):
     def refresh(self) -> None:
         self.tree.delete(*self.tree.get_children())
         self.rows = {}
-        changes = self.document.pending_changes()
+        changes = self.document.pending_changes(self.ref_label)
         parents: dict[int, str] = {}
-        for position, path, node, before, after in changes:
+        for position, change in changes:
             if position not in parents:
                 info = self.document.objects[position]
                 parents[position] = self.tree.insert("", "end", text=info.label(), open=True, tags=("object",))
                 self.rows[parents[position]] = (position, ())
             iid = self.tree.insert(
-                parents[position],
-                "end",
-                values=(
-                    bod.path_label(self.document.bod(position), path),
-                    bod.type_text(node),
-                    edits.state_text(node, before, self.ref_label),
-                    edits.state_text(node, after, self.ref_label),
-                ),
+                parents[position], "end", values=(change.label, change.kind, change.before, change.after)
             )
-            self.rows[iid] = (position, path)
+            self.rows[iid] = (position, change.path)
         objects = len(parents)
         self.summary_var.set(
-            f"{count(len(changes), 'propiedad cambiada', 'propiedades cambiadas')} en {count(objects, 'objeto')}"
-            if changes
-            else "No hay cambios pendientes."
+            f"{count(len(changes), 'cambio')} en {count(objects, 'objeto')}" if changes else "No hay cambios pendientes."
         )
 
     def _selected(self) -> tuple[int, tuple] | None:

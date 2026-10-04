@@ -10,6 +10,7 @@ from tkinter import ttk
 from typing import Callable
 
 from ..document import Document
+from ..formats import bod
 from ..formats.obsp import identity_text
 from . import theme
 
@@ -113,7 +114,7 @@ class ReferencePicker(tk.Toplevel):
 
     LIMIT = 800
 
-    def __init__(self, master: tk.Misc, document: Document, current: tuple[int, int], title: str) -> None:
+    def __init__(self, master: tk.Misc, document: Document, current: tuple[int, int] | None, title: str) -> None:
         super().__init__(master)
         self.title("Cambiar referencia — D2ScriptViewer")
         self.geometry("820x540")
@@ -124,15 +125,14 @@ class ReferencePicker(tk.Toplevel):
         self.filter_var = tk.StringVar()
         self.status_var = tk.StringVar()
 
-        current_info = document.object_by_identity(current)
-        current_text = current_info.label() if current_info else "(no existe)"
+        current_info = document.object_by_identity(current) if current is not None else None
+        if current is None:
+            now = "Ahora es nulo: elige el objeto al que apuntará la referencia nueva."
+        else:
+            current_text = current_info.label() if current_info else "(no existe)"
+            now = f"Ahora apunta a: {current_text}  [{identity_text(*current)}]"
         ttk.Label(self, text=title, style="TLabel", padding=(14, 12, 14, 0), font=("Segoe UI Semibold", 11)).pack(anchor="w")
-        ttk.Label(
-            self,
-            text=f"Ahora apunta a: {current_text}  [{identity_text(*current)}]",
-            style="Muted.TLabel",
-            padding=(14, 2, 14, 8),
-        ).pack(anchor="w")
+        ttk.Label(self, text=now, style="Muted.TLabel", padding=(14, 2, 14, 8)).pack(anchor="w")
         top = ttk.Frame(self, padding=(14, 0, 14, 6))
         top.pack(fill="x")
         ttk.Label(top, text="Filtrar").pack(side="left")
@@ -194,6 +194,106 @@ class ReferencePicker(tk.Toplevel):
 
     def choose(self) -> tuple[int, int] | None:
         """Muestra el diálogo y espera; devuelve la identidad elegida o ``None``."""
+        self.grab_set()
+        self.wait_window()
+        return self.result
+
+
+class FillNullDialog(tk.Toplevel):
+    """Elige con qué rellenar un nulo: la copia de un objeto de una clase vista en ese hueco o una referencia.
+
+    ``result`` queda en ``("copy", posición, ruta, clase)``, ``("ref",)`` o ``None``.
+    """
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        document: Document,
+        title: str,
+        slot: tuple,
+        classes: list[tuple[str, int, list]],
+        references: int,
+    ) -> None:
+        super().__init__(master)
+        self.title("Rellenar nulo — D2ScriptViewer")
+        self.geometry("860x520")
+        self.configure(bg=theme.BACKGROUND)
+        self.transient(master)
+        self.document = document
+        self.result: tuple | None = None
+        self.rows: dict[str, tuple[int, tuple, str]] = {}
+
+        owner, field, role = slot
+        role_text = {"campo": "valor del campo", "elemento": "elemento de la lista", "par": "valor de un par"}.get(role, role)
+        ttk.Label(self, text=title, padding=(14, 12, 14, 0), font=("Segoe UI Semibold", 11)).pack(anchor="w")
+        ttk.Label(
+            self,
+            text=f"Hueco: {owner}.{field} ({role_text}). Se copia un objeto de una clase que ya aparece en este "
+                 "mismo hueco en el archivo; elige un ejemplo y se insertará una copia exacta.",
+            style="Muted.TLabel",
+            wraplength=820,
+            justify="left",
+            padding=(14, 2, 14, 8),
+        ).pack(anchor="w", fill="x")
+
+        frame, self.tree = theme.scrolled(
+            self,
+            lambda parent: ttk.Treeview(parent, columns=("where",), show="tree headings", selectmode="browse"),
+        )
+        frame.pack(fill="both", expand=True, padx=14)
+        self.tree.heading("#0", text="Clase / ejemplo")
+        self.tree.heading("where", text="Propiedad")
+        self.tree.column("#0", width=380)
+        self.tree.column("where", width=420)
+        self.tree.tag_configure("class", foreground=theme.HEADING)
+        for label, count, examples in classes:
+            parent = self.tree.insert("", "end", text=f"{label}  ({count:,} en el archivo)", open=len(classes) == 1,
+                                      tags=("class",))
+            if examples:
+                self.rows[parent] = (*examples[0], label)
+            for position, path in examples:
+                info = document.objects[position]
+                try:
+                    where = bod.path_label(document.baseline_tree(position), path)
+                except Exception:  # noqa: BLE001 - un ejemplo ilegible no impide elegir otro
+                    continue
+                iid = self.tree.insert(parent, "end", text=info.label(), values=(where,))
+                self.rows[iid] = (position, path, label)
+        self.tree.bind("<Double-1>", lambda _event: self.accept())
+
+        bottom = ttk.Frame(self, padding=(14, 8, 14, 12))
+        bottom.pack(fill="x")
+        message = "" if classes else "En el archivo no hay objetos en este hueco. "
+        if references:
+            message += f"En este hueco hay {references:,} referencias en el archivo."
+        ttk.Label(bottom, text=message, style="Muted.TLabel").pack(side="left")
+        ttk.Button(bottom, text="Cancelar", command=self.destroy).pack(side="right")
+        if classes:
+            ttk.Button(bottom, text="Copiar este objeto", style="Accent.TButton", command=self.accept).pack(
+                side="right", padx=(0, 8)
+            )
+        if references:
+            ttk.Button(bottom, text="Referencia a un objeto…", command=self.choose_reference).pack(
+                side="right", padx=(0, 8)
+            )
+        self.bind("<Escape>", lambda _event: self.destroy())
+        first = self.tree.get_children()
+        if first:
+            self.tree.selection_set(first[0])
+            self.tree.focus(first[0])
+
+    def accept(self) -> None:
+        selection = self.tree.selection()
+        if selection and selection[0] in self.rows:
+            position, path, label = self.rows[selection[0]]
+            self.result = ("copy", position, path, label)
+            self.destroy()
+
+    def choose_reference(self) -> None:
+        self.result = ("ref",)
+        self.destroy()
+
+    def choose(self) -> tuple | None:
         self.grab_set()
         self.wait_window()
         return self.result

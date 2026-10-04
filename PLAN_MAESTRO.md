@@ -1,5 +1,51 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> Fase 5 implementada (2026-10-04), pendiente de la prueba en el juego (punto de control):
+>
+> - **Operaciones** (`edits.py`): `InsertItem`, `RemoveItem`, `MoveItem`, `ReplaceValue` y
+>   `ReplaceTree`, todas reversibles y con la misma forma que `ValueEdit`. El documento ofrece
+>   `duplicate_item`, `remove_item`, `move_item`, `set_null`, `fill_null`, `copy_example` y
+>   `revert_object`; revertir sustituye el árbol entero y también se puede deshacer.
+> - **Modelo de cambios nuevo** (`document.py`): un objeto está modificado si sus bytes actuales
+>   difieren de los de partida. Los cambios pendientes salen de comparar el árbol actual con el de
+>   partida (`diffing.py`), así que distinguen valor, reemplazado, añadido, eliminado y movido. El
+>   modelo anterior guardaba los originales por ruta y no servía cuando las rutas se desplazan.
+> - **Índice de huecos** (`references.SlotIndex`, en la misma pasada de fondo): qué clases y si
+>   hay referencias en cada (clase dueña, campo, papel). Ofrece ejemplos para rellenar un nulo,
+>   que se copian del árbol de partida.
+> - **Validación** (`validation.py`, aplicada en `prepare_save`): claves repetidas y `FC` sin
+>   destino bloquean; los `*ID` repetidos nuevos avisan. Las listas se comparan con su pareja
+>   según el alineamiento del diff, no por ruta. Un primer intento por ruta daba 39 avisos falsos
+>   al duplicar un estado de movimiento; hay un test de regresión.
+> - **GUI:** menú contextual, Editar → Estructura y atajos Ctrl+D, Supr y Alt+↑/↓. El panel se
+>   repinta conservando los nodos abiertos. Diálogo para rellenar nulos. Los avisos piden
+>   confirmación al guardar y los errores lo impiden.
+>
+> Medido: duplicar, mover o quitar en el objeto más grande (350 KB) cuesta 0,16 s como máximo.
+> El fuzz de 400 operaciones al azar sobre 73 BOD reales recodifica siempre de forma canónica,
+> `verify` da correcto y deshacerlo todo devuelve `B46DD3DA…`. 155 tests. La edición candidata
+> para el juego está en `research/PRUEBAS_EN_JUEGO.md` y ensayada sobre una copia.
+>
+> Decisiones de la fase 5 (2026-10-04), confirmadas por el usuario a partir del análisis de los
+> 4 172 BOD:
+>
+> - **Tuplas `0B`:** sin cambios de forma; solo se editan sus valores. En el juego son de tamaño
+>   fijo por campo (35 campos, siempre 2, 3 o 4 elementos). Corrige la tabla de la sección 6.
+> - **Nulos:** «poner a nulo» solo donde hay un objeto `07` o una referencia `FC`; es donde
+>   aparecen los 220 nulos del juego (`AnimController`, `InterruptHandler`, `AmbientBehavior*`…).
+>   Un nulo se rellena copiando un objeto de una clase que ya aparece en ese mismo hueco (clase
+>   del objeto dueño + campo) en algún lugar del archivo, o con una referencia si en ese hueco
+>   también las hay.
+> - **«Duplicar objetos»** se refiere a objetos `07` dentro del árbol. Crear objetos nuevos en el
+>   índice OBSP exige una identidad nueva (hash del nombre): fase 6.
+> - **Validación al guardar:** impiden guardar una clave repetida en un mapa `0A` o en una lista
+>   de pares (no hay ninguna entre las 1 322 del juego) y un `FC` sin destino. Solo avisa un
+>   campo `*ID` que pasa a repetirse en una lista de objetos donde antes era único (solo el 72 %
+>   de esas listas tiene los `*ID` únicos en el juego, así que no es una regla general).
+> - **Cierre:** tests más un punto de control con una edición estructural que hace el usuario
+>   en el juego. El riesgo que se comprueba: insertar o borrar objetos `07` renumera sus
+>   índices internos, y no se sabe si el juego los usa.
+>
 > **Primer hito cerrado (2026-10-04): fases 0 a 4.** Fase 4 cerrada con la prueba en el juego
 > (detalle en `research/PRUEBAS_EN_JUEGO.md`):
 >
@@ -385,8 +431,9 @@ Editores por tipo de valor:
 | 05 cadena sin hash | Texto libre ASCII (≤ 65 535) | 3 |
 | 0F cadena con hash | Autocompletado entre las 70 182 cadenas conocidas; texto libre al resolver el hash | 3 / 6 |
 | FC referencia | Selector de objetos del índice; navegable | 3 |
-| 09 / 0A / 0B contenedores | Duplicar, eliminar y reordenar elementos | 5 |
-| FE nulo / 07 objeto | Poner a nulo; crear duplicando un objeto existente de la misma clase | 5 |
+| 09 / 0A contenedores | Duplicar, eliminar y reordenar elementos | 5 |
+| 0B tupla | Solo sus valores: es de tamaño fijo (decisión del 2026-10-04) | 3 |
+| FE nulo / 07 objeto / FC | Poner a nulo un 07 o FC; rellenar un nulo con la copia de un objeto de una clase vista en ese hueco | 5 |
 | Scripts (tipo 0) | Solo lectura; luego parches de literales del mismo tamaño | 7 |
 
 ## 7. Fases
@@ -456,6 +503,17 @@ edición, y la copia del original es idéntica al archivo previo.
 - Duplicar, eliminar y reordenar elementos de listas y pares de mapas; poner a nulo; duplicar objetos.
 - La renumeración de objetos y los contadores ya los resuelve el codificador.
 - Validaciones: IDs únicos donde existan y referencias FC válidas.
+
+**Hecho cuando** (fijado el 2026-10-04 con el usuario):
+
+- se pueden duplicar, eliminar, subir y bajar elementos de listas `09` (modo 0 y 1) y entradas
+  de mapas `0A`; poner a nulo un `07` o un `FC`; y rellenar un nulo según las decisiones de arriba;
+- todo se puede deshacer y revertir, y editar y deshacer deja el blob idéntico;
+- «Cambios pendientes» muestra también los cambios de estructura;
+- guardar se bloquea con claves repetidas o `FC` sin destino, y avisa de `*ID` nuevos repetidos;
+- un fuzz de operaciones aleatorias sobre los BOD reales recodifica de forma canónica y deshacerlo
+  todo devuelve el original;
+- el juego carga un archivo con una edición estructural (punto de control con el usuario).
 
 ### Fase 6 — Investigación: función de hash
 

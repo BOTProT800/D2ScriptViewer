@@ -260,6 +260,11 @@ def field_name(document: bod.BodDocument, path: tuple) -> str:
 
 
 # --- Comandos ---------------------------------------------------------------------------------
+#
+# Cada operación se aplica o se deshace sobre el árbol de su objeto. Las rutas son
+# coherentes porque deshacer y rehacer siguen un orden estricto (LIFO): cuando una
+# operación se deshace, el árbol está exactamente como quedó al aplicarla.
+# ``focus`` es la ruta que conviene seleccionar después (``None``: ninguna).
 
 
 @dataclass(frozen=True)
@@ -269,14 +274,153 @@ class ValueEdit:
     before: State
     after: State
 
+    def apply(self, tree: bod.BodDocument) -> None:
+        set_state(bod.resolve(tree, self.path), self.after)
+
+    def revert(self, tree: bod.BodDocument) -> None:
+        set_state(bod.resolve(tree, self.path), self.before)
+
+    def focus(self, forward: bool) -> tuple | None:
+        return self.path
+
+
+def _items_of(tree: bod.BodDocument, container_path: tuple) -> list:
+    container = bod.resolve(tree, container_path)
+    if not isinstance(container, (bod.BodList, bod.BodMap)):
+        raise EditError("Solo las listas y los mapas admiten añadir, quitar o mover elementos")
+    return container.items
+
+
+@dataclass(frozen=True)
+class InsertItem:
+    """Inserta ``item`` (un valor o, en listas de pares y mapas, un par) en ``index``."""
+
+    position: int
+    container_path: tuple
+    index: int
+    item: object
+
+    def apply(self, tree: bod.BodDocument) -> None:
+        _items_of(tree, self.container_path).insert(self.index, self.item)
+
+    def revert(self, tree: bod.BodDocument) -> None:
+        items = _items_of(tree, self.container_path)
+        assert items[self.index] is self.item
+        del items[self.index]
+
+    def focus(self, forward: bool) -> tuple | None:
+        return self.container_path + (self.index,) if forward else self.container_path
+
+
+@dataclass(frozen=True)
+class RemoveItem:
+    position: int
+    container_path: tuple
+    index: int
+    item: object
+
+    def apply(self, tree: bod.BodDocument) -> None:
+        items = _items_of(tree, self.container_path)
+        assert items[self.index] is self.item
+        del items[self.index]
+
+    def revert(self, tree: bod.BodDocument) -> None:
+        _items_of(tree, self.container_path).insert(self.index, self.item)
+
+    def focus(self, forward: bool) -> tuple | None:
+        return self.container_path if forward else self.container_path + (self.index,)
+
+
+@dataclass(frozen=True)
+class MoveItem:
+    position: int
+    container_path: tuple
+    source: int
+    target: int
+
+    def apply(self, tree: bod.BodDocument) -> None:
+        items = _items_of(tree, self.container_path)
+        items.insert(self.target, items.pop(self.source))
+
+    def revert(self, tree: bod.BodDocument) -> None:
+        items = _items_of(tree, self.container_path)
+        items.insert(self.source, items.pop(self.target))
+
+    def focus(self, forward: bool) -> tuple | None:
+        return self.container_path + ((self.target if forward else self.source),)
+
+
+@dataclass(frozen=True)
+class ReplaceValue:
+    """Sustituye el valor de un hueco por otro de distinto tipo (objeto o referencia ↔ nulo)."""
+
+    position: int
+    path: tuple
+    before: object
+    after: object
+
+    def _set(self, tree: bod.BodDocument, value: object) -> None:
+        bod.set_slot(bod.resolve(tree, self.path[:-1]), self.path[-1], value)
+
+    def apply(self, tree: bod.BodDocument) -> None:
+        self._set(tree, self.after)
+
+    def revert(self, tree: bod.BodDocument) -> None:
+        self._set(tree, self.before)
+
+    def focus(self, forward: bool) -> tuple | None:
+        return self.path
+
+
+@dataclass(frozen=True)
+class ReplaceTree:
+    """Cambia el árbol entero de un objeto (revertir). La aplica el documento, no el árbol."""
+
+    position: int
+    before: bod.BodDocument
+    after: bod.BodDocument
+
+    def focus(self, forward: bool) -> tuple | None:
+        return None
+
 
 @dataclass(frozen=True)
 class EditGroup:
     """Lo que se deshace o rehace de una vez."""
 
-    edits: tuple[ValueEdit, ...]
+    edits: tuple
     description: str
 
     @property
     def positions(self) -> list[int]:
         return sorted({edit.position for edit in self.edits})
+
+    @property
+    def structural(self) -> bool:
+        return any(not isinstance(edit, ValueEdit) for edit in self.edits)
+
+
+# --- Reglas de la edición estructural (decisiones de la fase 5) ------------------------------
+
+
+def structural_parent(tree: bod.BodDocument, path: tuple) -> tuple[object, object] | None:
+    """(contenedor, nodo) si ``path`` es un elemento de una lista o una entrada de un mapa."""
+    if not path:
+        return None
+    container = bod.resolve(tree, path[:-1])
+    if isinstance(container, (bod.BodList, bod.BodMap)):
+        return container, bod.get_slot(container, path[-1])
+    return None
+
+
+def can_null(tree: bod.BodDocument, path: tuple) -> bool:
+    """Solo un objeto ``07`` o una referencia ``FC`` pueden pasar a nulo, y nunca en una tupla ni la clave de un par."""
+    if not path:
+        return False
+    node = bod.resolve(tree, path)
+    if not isinstance(node, (bod.BodObject, bod.ExternalRef)):
+        return False
+    parent = bod.resolve(tree, path[:-1])
+    if isinstance(parent, bod.BodTuple):
+        return False
+    return not (isinstance(parent, bod.Pair) and path[-1] == 0)

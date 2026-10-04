@@ -275,7 +275,7 @@ class EditingGuiTests(TempDirMixin, unittest.TestCase):
         window = self.app.pending_window
         rows = [window.tree.item(iid, "values") for parent in window.tree.get_children()
                 for iid in window.tree.get_children(parent)]
-        self.assertEqual(rows, [("Health", "int32", "100", "5"), ("Speed", "float32", "1.5", "3")])
+        self.assertEqual(rows, [("Health", "valor", "100", "5"), ("Speed", "valor", "1.5", "3")])
         window.tree.selection_set(window.tree.get_children()[0])
         window._revert()
         self.assertEqual(window.tree.get_children(), ())
@@ -346,6 +346,173 @@ class EditingGuiTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(self.file.read_bytes(), fixtures.make_obsp())
         self.assertEqual(self.app.document.obsp.data, fixtures.make_obsp())
         self.assertIn("vuelve a ser la copia del original", self.notes[-1])
+
+
+@requires_tk
+class StructureGuiTests(TempDirMixin, unittest.TestCase):
+    def setUp(self) -> None:
+        from d2scriptviewer.gui.app import ViewerApp
+
+        self.app = ViewerApp(auto_open=False, persist_settings=False)
+        self.app.withdraw()
+        self.addCleanup(self.app.destroy)
+        self.alerts: list[str] = []
+        self.answers: list[bool] = []
+        self.app.alert = lambda _title, message: self.alerts.append(message)
+        self.app.inform = lambda _title, message: None
+        self.app.ask = lambda _title, message, **_options: self.answers.pop(0) if self.answers else True
+        self.folder = self.make_temp_dir()
+        self.file = self.folder / "scripts.obsp"
+        self.file.write_bytes(fixtures.make_obsp())
+        self.document = Document.open(self.file)
+        self.app.set_document(self.document)
+        self.assertTrue(pump(self.app, lambda: self.app.indexes is not None))
+        self.desc = self.document.find("death/death_desc")[0].position
+        self.app.navigate(self.desc)
+        self.view = self.app.property_view
+
+    def path(self, label: str) -> tuple:
+        tree = self.document.bod(self.desc)
+        return next(path for path, _node in bod.walk(tree.root) if bod.path_label(tree, path) == label)
+
+    def rows(self, label: str) -> list[str]:
+        iid = self.view._iid_by_path[self.path(label)]
+        self.view._populate(iid)
+        return [self.view.tree.item(child, "text") for child in self.view.tree.get_children(iid)]
+
+    def selected_label(self) -> str:
+        _node, path = self.view.selected()
+        return bod.path_label(self.document.bod(self.desc), path)
+
+    def test_duplicate_remove_and_move_rebuild_the_view(self) -> None:
+        self.view.expand(self.path("Tags"))
+        self.app.structure_action("duplicate", self.path("Tags[0]"))
+        self.assertEqual(self.rows("Tags"), ["[0]", "[1]", "[2]"])
+        self.assertTrue(self.view.tree.item(self.view._iid_by_path[self.path("Tags")], "open"))
+        self.assertEqual(self.selected_label(), "Tags[1]")
+        self.assertIn("edited", self.view.tree.item(self.view._iid_by_path[self.path("Tags[1]")], "tags"))
+        self.assertIn("1 cambio sin guardar", self.app.changes_var.get())
+        self.app.structure_action("down", self.path("Tags[1]"))
+        self.assertEqual(self.selected_label(), "Tags[2]")
+        self.app.structure_action("remove", self.path("Tags[2]"))
+        self.assertEqual(self.rows("Tags"), ["[0]", "[1]"])
+        self.assertEqual(self.app.changes_var.get(), "Sin cambios")
+        self.app.undo()
+        self.assertEqual(self.rows("Tags"), ["[0]", "[1]", "[2]"])
+        self.assertEqual(self.selected_label(), "Tags[2]")
+
+    def test_keyboard_shortcuts(self) -> None:
+        self.view.reveal(self.path("Slots[0]"))
+        self.view._structure_key("duplicate")
+        self.assertEqual(len(self.document.bod(self.desc).root.fields[self.path("Slots")[0]].value.items), 3)
+        self.view._structure_key("remove")
+        self.assertEqual(self.document.change_count, 0)
+        self.view.reveal(self.path("Health"))
+        self.view._structure_key("remove")  # no es elemento de una lista: no hace nada
+        self.assertEqual(self.document.change_count, 0)
+
+    def test_context_actions(self) -> None:
+        cases = {
+            "Tags[0]": ["duplicate", "remove", "down"],
+            "Slots[1]": ["duplicate", "remove", "up", "null"],
+            "Stats": ["null"],
+            "Behavior": ["null"],
+            "Parent": ["fill"],
+            "Color[0]": [],
+            "Health": [],
+        }
+        for label, expected in cases.items():
+            with self.subTest(label=label):
+                path = self.path(label)
+                self.assertEqual(self.view.structure_actions(bod.resolve(self.document.bod(self.desc), path), path), expected)
+
+    def test_null_and_a_slot_without_examples(self) -> None:
+        from d2scriptviewer.gui import app as app_module
+
+        self.app.structure_action("null", self.path("Stats"))
+        self.assertEqual(self.view.tree.item(self.view._iid_by_path[self.path("Stats")], "values"), ("nulo", "null"))
+        notes: list[str] = []
+        self.app.inform = lambda _title, message: notes.append(message)
+        opened: list[tuple] = []
+
+        class FakeDialog:
+            def __init__(self, *args: object) -> None:
+                opened.append(args)
+
+            def choose(self) -> None:
+                return None
+
+        original = app_module.FillNullDialog
+        app_module.FillNullDialog = FakeDialog
+        try:
+            # En el archivo, ActorDesc.Parent nunca tiene un objeto ni una referencia: nada que copiar.
+            self.app.structure_action("fill", self.path("Parent"))
+        finally:
+            app_module.FillNullDialog = original
+        self.assertEqual(opened, [])
+        self.assertIn("ActorDesc.Parent", notes[-1])
+        self.assertEqual(self.document.change_count, 1)
+
+    def test_fill_offers_classes_seen_in_the_slot(self) -> None:
+        from d2scriptviewer.gui import app as app_module
+
+        self.app.structure_action("null", self.path("Script.Child"))
+        offered = {}
+
+        class FakeDialog:
+            def __init__(self, _master, _document, _title, slot, classes, references) -> None:
+                offered.update(slot=slot, classes=[row[0] for row in classes])
+                self.example = (*classes[0][2][0], classes[0][0])
+
+            def choose(self) -> tuple:
+                return ("copy", *self.example)
+
+        original = app_module.FillNullDialog
+        app_module.FillNullDialog = FakeDialog
+        try:
+            self.app.structure_action("fill", self.path("Script.Child"))
+        finally:
+            app_module.FillNullDialog = original
+        self.assertEqual(offered, {"slot": ("scripts/weaponbehavior", "Child", "campo"), "classes": ["Stats"]})
+        self.assertEqual(self.document.change_count, 0)  # nulo y relleno con un Stats igual: sin cambios netos
+
+    def test_saving_is_blocked_by_a_repeated_key_and_warns_on_ids(self) -> None:
+        self.app.structure_action("duplicate", self.path("Lookup[0]"))
+        self.assertIn("clave", self.view.hint_var.get())
+        self.app.save()
+        self.assertFalse(self.app.saving)
+        self.assertEqual(len(self.alerts), 1)
+        self.assertIn("claves repetidas", self.alerts[0])
+        self.assertEqual(self.file.read_bytes(), fixtures.make_obsp())
+        self.app.undo()
+        self.app.structure_action("duplicate", self.path("Slots[0]"))
+        self.answers = [False]
+        self.app.save()
+        self.assertFalse(self.app.saving)
+        self.assertEqual(self.file.read_bytes(), fixtures.make_obsp())
+        self.answers = [True]
+        self.app.save()
+        self.assertTrue(pump(self.app, lambda: not self.app.saving))
+        reopened = Document.open(self.file)
+        slots = bod.resolve(reopened.bod(self.desc), self.path("Slots"))
+        self.assertEqual(len(slots.items), 3)
+
+    def test_pending_window_lists_structural_changes(self) -> None:
+        self.app.structure_action("remove", self.path("Tags[0]"))
+        self.app.structure_action("null", self.path("Stats"))
+        self.app.open_pending()
+        window = self.app.pending_window
+        rows = [window.tree.item(iid, "values") for parent in window.tree.get_children()
+                for iid in window.tree.get_children(parent)]
+        self.assertEqual(
+            sorted(rows),
+            sorted([("Tags[0] (posición original)", "eliminado", "death_mesh", "—"),
+                    ("Stats", "reemplazado", "objeto Stats", "null")]),
+        )
+        window.tree.selection_set(window.tree.get_children()[0])
+        window._revert()
+        self.assertEqual(self.document.change_count, 0)
+        self.assertEqual(self.rows("Tags"), ["[0]", "[1]"])
 
 
 @requires_tk

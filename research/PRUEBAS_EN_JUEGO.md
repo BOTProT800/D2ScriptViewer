@@ -99,3 +99,37 @@ Con autorización del usuario, Claude restauró el archivo instalado con
 
 En la carpeta `media\` quedan `scripts.original.obsp` (copia permanente, de solo lectura) y
 `.d2sv_backups\` con cuatro versiones (unos 73 MB), que se pueden borrar.
+
+## Fase 5 — edición estructural (2026-10-04)
+
+Comprueba el riesgo de la fase 5: al insertar o quitar objetos `07`, el codificador renumera sus
+índices internos. Si el juego los usara para algo, un objeto posterior a la inserción se leería
+mal.
+
+### Edición elegida
+
+Se eligió con el visor y se ensayó sobre una copia en una carpeta temporal: validar, guardar,
+releer, `verify` y restaurar dieron lo esperado.
+
+- **Objeto:** `death/playercommon_movestates` (`CharacterMoveStateList`, 108 estados, 961 objetos
+  `07`). `death/death_desc` lo enlaza en `MoveStateListArray.MoveStateLists[0]`.
+- **Cambio estructural:** duplicar `MoveStates[0]`, un `PlayerGenericStateDesc` con
+  `Name` = `Death` e `ID` = 100000 y 3 objetos en su subárbol. La copia queda en
+  `MoveStates[1]` y es idéntica al original.
+- **Marca visible:** `MoveStates[45].JumpImpulse` 350 → 700. Es el estado «Jump», que estaba en
+  `[44]` y la inserción desplaza a `[45]`.
+- **En el ensayo:**
+  - el blob pasa de 50 374 a 50 543 bytes y el archivo de 18 334 463 a 18 334 632 (+169);
+  - los objetos pasan de 961 a 964, y el índice interno del estado «Jump» de 585 a 588;
+  - la validación da un único aviso, «MoveStates: el campo ID se repite (100000)», que es
+    esperado: se acepta;
+  - el SHA del archivo guardado empieza por `FE50F6A4E22CE77E`.
+- **Efecto esperado:** el juego arranca y carga la partida; Death se mueve, ataca y salta con
+  normalidad, y el salto normal es mucho más alto. Si el juego usara los índices internos de los
+  `07`, los estados posteriores a `[0]` (casi todos) quedarían desalineados y el movimiento
+  fallaría o el juego se cerraría. **Hipótesis:** que un estado repetido e idéntico (mismo `Name`
+  e `ID`) no cambie nada se deduce de que la copia es exacta; también es parte de lo que se prueba.
+
+### Resultado
+
+Pendiente: lo registrará el usuario tras jugar.

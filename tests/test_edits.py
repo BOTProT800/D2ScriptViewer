@@ -234,10 +234,10 @@ class DocumentEditTests(unittest.TestCase):
         enabled = path_of(self.document.bod(instance), "Enabled")
         self.document.edit_text(instance, enabled, "false")
         changes = self.document.pending_changes()
-        self.assertEqual([(position, path) for position, path, *_ in changes],
+        self.assertEqual([(position, change.path) for position, change in changes],
                          [(self.desc, self.path("Health")), (instance, enabled)])
-        _position, _path, node, before, after = changes[0]
-        self.assertEqual((edits.state_text(node, before), edits.state_text(node, after)), ("100", "5"))
+        change = changes[0][1]
+        self.assertEqual((change.kind, change.label, change.before, change.after), ("valor", "Health", "100", "5"))
         self.assertEqual(self.document.modified_positions, {self.desc, instance})
 
     def test_invalid_edits_change_nothing(self) -> None:

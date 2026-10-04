@@ -50,6 +50,19 @@ un entero, redondeo de un float).
 
 Los objetos de script compilado son de solo lectura.
 
+### Cambiar la estructura
+
+Sobre un elemento de una lista o una entrada de un mapa: **Ctrl+D** lo duplica (la copia queda
+justo detrás), **Supr** lo elimina y **Alt+↑ / Alt+↓** lo mueven. Con el clic derecho (o Editar →
+Estructura) también se puede **poner a nulo** un objeto o una referencia, y **rellenar un nulo**
+copiando un objeto de una clase que ya aparece en ese mismo hueco en el archivo.
+
+- Las tuplas (vectores, colores) tienen tamaño fijo: solo se editan sus valores.
+- Al duplicar una entrada de un mapa, la clave queda repetida: cámbiala antes de guardar, porque
+  una clave repetida impide guardar. Una referencia sin destino también lo impide.
+- Si un campo `…ID` pasa a repetirse en una lista donde antes era único (lo normal tras duplicar
+  un elemento), la herramienta avisa y pide confirmación al guardar.
+
 ### Guardar
 
 - **Guardar** (Ctrl+S) reescribe el archivo en el mismo formato `.obsp`. La primera vez que se

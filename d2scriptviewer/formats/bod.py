@@ -529,6 +529,98 @@ def encode(document: BodDocument) -> bytes:
     return header + bytes(encoder.out)
 
 
+class _FingerprintEncoder(_Encoder):
+    """Serializa un subárbol sin depender de su contexto: sin internado ni numeración."""
+
+    __slots__ = ()
+
+    def name(self, name: Name) -> None:
+        raw = name.text.encode(TEXT_ENCODING)
+        self.out += NAME_HEAD.pack(name.hash, len(raw))
+        self.out += raw
+
+    def value(self, value: Value) -> None:
+        if type(value) is BodObject:
+            # El índice depende de la posición en el blob; para comparar no cuenta.
+            self.out.append(TAG_OBJECT)
+            self.class_ref(value.cls)
+            self.fields(value.fields)
+            return
+        super().value(value)
+
+
+def fingerprint(node: object) -> bytes:
+    """Bytes que identifican el contenido de un subárbol, esté donde esté.
+
+    Dos subárboles con la misma huella se codifican igual en cualquier posición.
+    """
+    encoder = _FingerprintEncoder()
+    if isinstance(node, Pair):
+        encoder.value(node.key)
+        encoder.value(node.value)
+    else:
+        encoder.value(node)  # type: ignore[arg-type]
+    return bytes(encoder.out)
+
+
+def clone(node: object) -> object:
+    """Copia profunda de un valor o de un par. Los nombres y los bytes crudos son inmutables."""
+    kind = type(node)
+    if kind is Int32 or kind is Float32 or kind is Bool:
+        return kind(node.raw)  # type: ignore[attr-defined]
+    if kind is RawString:
+        return RawString(node.text)  # type: ignore[attr-defined]
+    if kind is HashedString:
+        return HashedString(node.name)  # type: ignore[attr-defined]
+    if kind is ExternalRef:
+        return ExternalRef(node.group, node.object_id)  # type: ignore[attr-defined]
+    if kind is Null:
+        return Null()
+    if kind is BodObject:
+        return BodObject(
+            node.index,  # type: ignore[attr-defined]
+            node.cls,  # type: ignore[attr-defined]
+            [Field(field.name, clone(field.value)) for field in node.fields],  # type: ignore[attr-defined]
+        )
+    if kind is BodList or kind is BodMap:
+        return kind(node.mode, [clone(item) for item in node.items])  # type: ignore[attr-defined]
+    if kind is BodTuple:
+        return BodTuple([clone(item) for item in node.items])  # type: ignore[attr-defined]
+    if kind is Pair:
+        return Pair(clone(node.key), clone(node.value))  # type: ignore[attr-defined]
+    raise FormatError(f"No se puede copiar un {kind.__name__}")
+
+
+def clone_document(document: BodDocument) -> BodDocument:
+    root = clone(document.root)
+    assert isinstance(root, BodObject)
+    return BodDocument(
+        document.version, document.flags, root, document.declared_name_count, document.declared_max_name_length
+    )
+
+
+def get_slot(parent: object, key: int) -> object:
+    """El hijo ``key`` de ``parent`` (mismo criterio que :func:`children`)."""
+    return children(parent)[key][1]
+
+
+def set_slot(parent: object, key: int, value: object) -> None:
+    """Sustituye el hijo ``key`` de ``parent`` por ``value``."""
+    if isinstance(parent, BodObject):
+        parent.fields[key].value = value  # type: ignore[assignment]
+    elif isinstance(parent, (BodList, BodMap, BodTuple)):
+        parent.items[key] = value
+    elif isinstance(parent, Pair):
+        if key == 0:
+            parent.key = value  # type: ignore[assignment]
+        elif key == 1:
+            parent.value = value  # type: ignore[assignment]
+        else:
+            raise IndexError(key)
+    else:
+        raise FormatError(f"Un {type(parent).__name__} no tiene hijos")
+
+
 # --- Recorrido y presentación -----------------------------------------------------------------
 
 #: Un paso de ruta: índice de campo, de elemento o, dentro de un par, 0 (clave) / 1 (valor).

@@ -28,12 +28,12 @@ from ..edits import EditGroup
 from ..errors import D2ScriptViewerError, EditError
 from ..formats import bod
 from ..formats.obsp import identity_text
-from ..references import Cancelled, FileIndexes, build_indexes, references_in
+from ..references import Cancelled, FileIndexes, build_indexes, references_in, slot_key
 from ..settings import DEFAULT_GAME, find_default_obsp, load_settings, save_settings
 from ..wording import count as count_text
 from . import theme
 from .details import DetailsPanel
-from .editors import ReferencePicker
+from .editors import FillNullDialog, ReferencePicker
 from .object_tree import GROUP_MODES, ObjectTree
 from .pending_view import PendingChangesWindow
 from .property_view import PropertyView
@@ -75,6 +75,7 @@ class ViewerApp(tk.Tk):
         )
         #: Avisos informativos (resumen del primer guardado); también sustituibles.
         self.inform: Callable[[str, str], None] = lambda title, message: messagebox.showinfo(title, message, parent=self)
+        self.alert: Callable[[str, str], None] = lambda title, message: messagebox.showerror(title, message, parent=self)
         self.saving = False
         self._after_save: Callable[[], None] | None = None
         self._game_save_confirmed: set[Path] = set()
@@ -123,6 +124,19 @@ class ViewerApp(tk.Tk):
         self.edit_menu.add_separator()
         self.edit_menu.add_command(label="Editar valor", accelerator="F2", command=self.property_view_edit)
         self.edit_menu.add_command(label="Revertir objeto", command=self.revert_current_object)
+        structure_menu = tk.Menu(self.edit_menu, tearoff=False)
+        for label, accelerator, action in (
+            ("Duplicar elemento", "Ctrl+D", "duplicate"),
+            ("Eliminar elemento", "Supr", "remove"),
+            ("Subir", "Alt+↑", "up"),
+            ("Bajar", "Alt+↓", "down"),
+            ("Poner a nulo", "", "null"),
+            ("Rellenar nulo con un objeto…", "", "fill"),
+        ):
+            structure_menu.add_command(
+                label=label, accelerator=accelerator, command=lambda action=action: self._structure_from_menu(action)
+            )
+        self.edit_menu.add_cascade(label="Estructura", menu=structure_menu)
         self.edit_menu.add_separator()
         self.edit_menu.add_command(label="Cambios pendientes…", accelerator="Ctrl+P", command=self.open_pending)
         menubar.add_cascade(label="Editar", menu=self.edit_menu)
@@ -193,6 +207,7 @@ class ViewerApp(tk.Tk):
             on_edit_text=self.commit_text_edit,
             on_pick_reference=self.pick_reference,
             on_revert_property=self.revert_property,
+            on_structure=self.structure_action,
             hint=self.edit_hint,
             suggest=self.suggest_names,
         )
@@ -621,13 +636,97 @@ class ViewerApp(tk.Tk):
             return
         self._after_change(group, reveal=position != self.position)
 
+    def _structure_from_menu(self, action: str) -> None:
+        selected = self.property_view.selected()
+        if selected is None:
+            self.status_var.set("Selecciona antes una propiedad en el panel central")
+            return
+        node, path = selected
+        if action not in self.property_view.structure_actions(node, path):
+            self.status_var.set("Esa operación no se puede hacer sobre la propiedad seleccionada")
+            return
+        self.structure_action(action, path)
+
+    def structure_action(self, action: str, path: tuple) -> None:
+        """Duplicar, eliminar, mover, poner a nulo o rellenar (fase 5) en el objeto mostrado."""
+        document, position = self.document, self.position
+        if document is None or position is None or self.saving:
+            return
+        self.property_view.cancel_edit()
+        if action == "fill":
+            self.fill_null(path)
+            return
+        try:
+            if action == "duplicate":
+                group = document.duplicate_item(position, path)
+            elif action == "remove":
+                group = document.remove_item(position, path)
+            elif action in ("up", "down"):
+                group = document.move_item(position, path, -1 if action == "up" else 1)
+            elif action == "null":
+                group = document.set_null(position, path)
+            else:
+                return
+        except EditError as error:
+            self.property_view.set_hint(str(error), "error")
+            return
+        if group is None:
+            self.status_var.set("El elemento ya está en ese extremo de la lista")
+            return
+        self._after_change(group, reveal=True)
+        container = bod.resolve(document.bod(position), path[:-1]) if path else None
+        if action == "duplicate" and isinstance(container, (bod.BodMap, bod.BodList)) and container.mode == bod.MODE_PAIRS:
+            self.property_view.set_hint(
+                "La copia repite la clave de la entrada original: cámbiala antes de guardar (una clave repetida "
+                "impide guardar).", "warn"
+            )
+
+    def fill_null(self, path: tuple) -> None:
+        document, position = self.document, self.position
+        if document is None or position is None:
+            return
+        if self.indexes is None:
+            self.status_var.set("Espera a que termine el índice del archivo para rellenar nulos")
+            return
+        tree = document.bod(position)
+        key = slot_key(tree, path)
+        classes = self.indexes.slots.classes(key)
+        references = self.indexes.slots.references(key)
+        title = f"{document.objects[position].label()} · {document.property_label(position, path)}"
+        if not classes and not references:
+            self.inform(APP_NAME, f"En el archivo no aparece ningún objeto ni referencia en el hueco "
+                                  f"{key[0]}.{key[1]}, así que no hay de dónde copiar uno con seguridad.")
+            return
+        choice = FillNullDialog(self, document, title, key, classes, references).choose()
+        if choice is None:
+            return
+        try:
+            if choice[0] == "copy":
+                value: object = document.copy_example(choice[1], choice[2], choice[3])
+            else:
+                value = None
+        except EditError as error:
+            self.alert(APP_NAME, str(error))
+            return
+        if value is None:
+            identity = ReferencePicker(self, document, None, title).choose()
+            if identity is None:
+                return
+            value = bod.ExternalRef(*identity)
+        try:
+            group = document.fill_null(position, path, value)
+        except EditError as error:
+            self.alert(APP_NAME, str(error))
+            return
+        self._after_change(group, reveal=True)
+
     def undo(self) -> None:
         if self.document is None or self.saving:
             return
         self.property_view.cancel_edit()
         group = self.document.undo()
         if group is not None:
-            self._after_change(group, reveal=True, prefix="Deshecho")
+            self._after_change(group, reveal=True, prefix="Deshecho", forward=False)
 
     def redo(self) -> None:
         if self.document is None or self.saving:
@@ -637,21 +736,31 @@ class ViewerApp(tk.Tk):
         if group is not None:
             self._after_change(group, reveal=True, prefix="Rehecho")
 
-    def _after_change(self, group: EditGroup, *, reveal: bool, prefix: str = "") -> None:
-        """Pone al día todas las vistas tras editar, deshacer, rehacer o revertir."""
+    def _after_change(self, group: EditGroup, *, reveal: bool, prefix: str = "", forward: bool = True) -> None:
+        """Pone al día todas las vistas tras editar, deshacer, rehacer o revertir.
+
+        Si la operación cambia la estructura (o el árbol entero, al revertir), el
+        panel de propiedades se repinta: sus filas apuntaban a nodos que ya no están.
+        """
         document = self.document
         assert document is not None
         if self.indexes is not None:
             for position in group.positions:
                 self.indexes.references.set_object(position, references_in(position, document.bod(position)))
         self.object_tree.set_modified(document.modified_positions)
-        first = group.edits[0]
-        if reveal and first.position != self.position:
-            self.navigate(first.position, first.path)
+        operation = group.edits[-1] if forward else group.edits[0]
+        focus = operation.focus(forward)
+        if reveal and operation.position != self.position:
+            self.navigate(operation.position, focus)
         elif self.position is not None and document.cached_bod(self.position) is not None:
-            self.property_view.set_edited(document.edited_paths(self.position))
-            if reveal:
-                self.property_view.reveal(first.path)
+            edited = document.edited_paths(self.position)
+            if group.structural and self.position in group.positions:
+                tree = document.bod(self.position)
+                self.property_view.rebuild(self._object_title(self.position), tree, edited, focus if reveal else None)
+            else:
+                self.property_view.set_edited(edited)
+                if reveal and focus:
+                    self.property_view.reveal(focus)
             self._show_details(self.position)
         if self.pending_window is not None and self.pending_window.winfo_exists():
             self.pending_window.refresh()
@@ -781,8 +890,14 @@ class ViewerApp(tk.Tk):
         try:
             plan = saving.prepare_save(document)
         except D2ScriptViewerError as error:
-            messagebox.showerror(APP_NAME, str(error), parent=self)
+            self.alert(APP_NAME, str(error))
             return
+        if plan.warnings:
+            listed = "\n".join(f"• {warning}" for warning in plan.warnings[:15])
+            more = f"\n… y {len(plan.warnings) - 15} más" if len(plan.warnings) > 15 else ""
+            if not self.ask(APP_NAME, f"Avisos antes de guardar:\n{listed}{more}\n\n¿Guardar de todos modos?",
+                            icon="warning"):
+                return
         self.saving = True
         self._after_save = then
         self.status_var.set(f"Guardando {target.name}…")

@@ -9,6 +9,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ### Added
 
+- Edición estructural de BOD (fase 5): duplicar, eliminar, subir y bajar elementos de listas y
+  entradas de mapas (Ctrl+D, Supr, Alt+↑/↓, clic derecho o Editar → Estructura); poner a nulo un
+  objeto o una referencia; rellenar un nulo con la copia de un objeto de una clase que ya aparece
+  en ese hueco del archivo, o con una referencia. Las tuplas, de tamaño fijo en el juego, solo
+  admiten editar sus valores. Todo se puede deshacer y revertir.
+- «Cambios pendientes» muestra también los cambios de estructura (añadido, eliminado, movido,
+  reemplazado), calculados comparando con el árbol de partida.
+- Validación al guardar: una clave repetida en un mapa o lista de pares, o una referencia sin
+  destino, impiden guardar; un `*ID` que pasa a repetirse pide confirmación.
 - Base del repositorio: paquete `d2scriptviewer` con `python -m d2scriptviewer --version`,
   `pyproject.toml` sin dependencias, licencia MIT, cabeceras SPDX, `CREDITS.md` y `README.md`.
 - CI de tests en Windows con Python 3.10–3.13, que comprueba que no hacen falta dependencias.

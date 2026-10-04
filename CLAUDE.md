@@ -21,8 +21,10 @@ principio, como hace el plan de Darksiders2DLL.
 Estado al 4 de octubre de 2026: **primer hito cerrado** (fases 0 a 4): visor, edición de
 valores y guardado en `.obsp` con copia del original, validados en el juego. El juego carga un
 archivo guardado por la herramienta, también con otro tamaño y los offsets recalculados, y
-restaurar devuelve el SHA de Steam (`research/PRUEBAS_EN_JUEGO.md`). Lo siguiente son las fases
-5 a 9, a elección del usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+restaurar devuelve el SHA de Steam (`research/PRUEBAS_EN_JUEGO.md`). Fase 5 (edición
+estructural) implementada y pendiente de su prueba en el juego; sus decisiones (tuplas fijas,
+nulos solo en huecos de objeto, qué bloquea y qué avisa al guardar) están al principio del plan.
+Las fases 6 a 9 quedan a elección del usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -57,22 +59,27 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   canónico, recorrido y presentación), `script.py` (cabecera de tipo 0), `hashes.py`.
 - `document.py`: archivo abierto con decodificación bajo demanda y caché (`bod()` es seguro
   entre hilos: todos reciben el mismo árbol).
-- `edits.py`: validación del texto del usuario por tipo, avisos de identificador y comandos
-  (`ValueEdit`, `EditGroup`). Una edición cambia el *estado* de una hoja, nunca su tipo.
-  `Document.edit()` / `undo()` / `redo()` / `revert_*()` llevan el registro; un objeto está
-  modificado mientras alguna propiedad difiera de su original.
+- `edits.py`: validación del texto del usuario por tipo, avisos de identificador y operaciones
+  reversibles (`ValueEdit`, `InsertItem`, `RemoveItem`, `MoveItem`, `ReplaceValue`,
+  `ReplaceTree`, agrupadas en `EditGroup`). Las rutas valen porque deshacer y rehacer son LIFO.
+- `document.py`: un objeto está **modificado si sus bytes difieren** de los de partida; nada de
+  originales por ruta (las rutas se desplazan al insertar o quitar). `changes()` compara el árbol
+  actual con `baseline_tree()` mediante `diffing.py` (alineamiento por huellas y LCS).
+- `validation.py`: claves repetidas y `FC` sin destino bloquean `prepare_save`; los `*ID`
+  repetidos nuevos avisan (listas alineadas con el diff, no por ruta).
 - `saving.py`: `prepare_save` (en el hilo de Tk) y `execute_save` (en un hilo): autoverificar,
   comprobar que se puede escribir, copia del original, copia rotativa, `.tmp` + `fsync` +
   `os.replace` y relectura con SHA. `restore_original`, `file_status`, `cleanup_orphan_tmp`.
   `fail_at` permite a los tests simular fallos en cada paso.
-- `references.py` (índice `FC` y diccionario en una pasada) y `search.py` (búsqueda en hilo).
+- `references.py` (índice `FC`, diccionario y `SlotIndex` de huecos en una pasada) y `search.py`
+  (búsqueda en hilo).
 - `wording.py`: plurales («1 objeto», «2 objetos»).
 - `verification.py`: las comprobaciones completas que usa `verify`.
 - `gui/`: `app.py` (ventana, hilos, navegación, edición), `object_tree.py`, `property_view.py`,
-  `editors.py` (editor en la celda y selector de referencias), `pending_view.py`, `details.py`,
+  `editors.py` (editor en la celda, selector de referencias y `FillNullDialog`), `pending_view.py`, `details.py`,
   `script_view.py`, `search_view.py`, `theme.py`. Los hilos solo encolan mensajes;
-  `_poll_messages` los atiende en el hilo de Tk. Las confirmaciones pasan por `app.ask`, que
-  los tests sustituyen.
+  `_poll_messages` los atiende en el hilo de Tk. Las confirmaciones y avisos pasan por `app.ask`,
+  `app.ask_save`, `app.inform` y `app.alert`, que los tests sustituyen.
 - `tests/fixtures.py`: OBSP sintético con los 11 tags; `tests/support.py`: archivo real;
   `tests/test_gui.py`: humo de la GUI (se omite sin Tk).
 - `research/FORMATO.md`: hallazgos de formato fuera del apéndice A.

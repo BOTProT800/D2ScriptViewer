@@ -99,7 +99,7 @@ class BodCodecTests(unittest.TestCase):
             node.index for _path, node in bod.walk(decoded.root)
             if isinstance(node, bod.BodObject) and node.index is not None
         ]
-        self.assertEqual(indices, [0, 1, 2])
+        self.assertEqual(indices, [0, 1, 2, 3, 4])
 
     def test_raw_numbers_are_preserved(self) -> None:
         signalling_nan = b"\x01\x00\x80\x7f"

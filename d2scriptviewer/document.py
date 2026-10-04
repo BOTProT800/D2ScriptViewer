@@ -7,11 +7,12 @@ Abrir solo lee cabecera, cadenas e índice. Cada objeto se decodifica la primera
 vez que se pide y queda en caché. El archivo se lee entero y se cierra: abrirlo
 no lo bloquea ni escribe nada.
 
-Las ediciones cambian el árbol en caché y se guardan como comandos reversibles.
-El documento recuerda el estado original de cada propiedad tocada: un objeto
-está modificado mientras alguna difiera de su original, así que editar y volver
-al valor de partida (a mano o deshaciendo) lo deja como estaba y sus bytes
-vuelven a ser los originales.
+Las ediciones cambian el árbol en caché y se guardan como operaciones reversibles
+(:mod:`.edits`). Un objeto está **modificado** si sus bytes actuales difieren de los
+de partida: editar y volver al valor original (a mano, deshaciendo o revirtiendo)
+lo deja sin cambios y sus bytes vuelven a ser los originales. Los cambios
+pendientes se obtienen comparando el árbol actual con el de partida
+(:mod:`.diffing`), así que no dependen del historial.
 """
 
 from __future__ import annotations
@@ -19,8 +20,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import edits
-from .edits import EditGroup, State, ValueEdit
+from . import diffing, edits
+from .diffing import Change
+from .edits import EditGroup, InsertItem, MoveItem, RemoveItem, ReplaceTree, ReplaceValue, State, ValueEdit
 from .errors import EditError
 from .formats import bod, script
 from .formats.hashes import HashDictionary
@@ -66,12 +68,14 @@ class Document:
         self._index_objects()
         self._bod_cache: dict[int, bod.BodDocument] = {}
         self._script_cache: dict[int, script.ScriptHeader] = {}
-        #: posición → ruta → estado original de cada propiedad que hoy difiere de él.
-        self._originals: dict[int, dict[tuple, State]] = {}
+        #: Objetos a los que se ha aplicado alguna operación desde la última base.
+        self._touched: set[int] = set()
         self._encoded: dict[int, bytes] = {}
+        self._baseline_trees: dict[int, bod.BodDocument] = {}
+        self._changes: dict[int, tuple[int, list[Change]]] = {}
         self._undo: list[EditGroup] = []
         self._redo: list[EditGroup] = []
-        #: Crece con cada cambio; sirve para saber si una vista está al día.
+        #: Crece con cada cambio; sirve para saber si una vista o una caché está al día.
         self.version = 0
 
     def _index_objects(self) -> None:
@@ -102,8 +106,10 @@ class Document:
         self.obsp = obsp
         self.path = path
         self._index_objects()
-        self._originals.clear()
+        self._touched.clear()
         self._encoded.clear()
+        self._baseline_trees.clear()
+        self._changes.clear()
         self.version += 1
 
     @classmethod
@@ -133,35 +139,67 @@ class Document:
             return exact
         return [info for info in self.objects if needle in info.path.casefold() or needle in info.name.casefold()]
 
+    # --- Estado ---------------------------------------------------------------------------
+
     def original_blob(self, position: int) -> bytes:
+        """Los bytes de partida (los del archivo abierto o del último guardado)."""
         return self.obsp.blob(position)
 
-    def is_modified(self, position: int) -> bool:
-        return position in self._originals
-
-    @property
-    def modified_positions(self) -> set[int]:
-        return set(self._originals)
-
-    @property
-    def change_count(self) -> int:
-        """Número de propiedades que hoy difieren de su valor original."""
-        return sum(len(paths) for paths in self._originals.values())
-
     def blob(self, position: int) -> bytes:
-        """Bytes actuales del objeto: los originales o, si se editó, el árbol recodificado."""
-        if position not in self._originals:
+        """Bytes actuales del objeto: los de partida o, si se tocó, el árbol recodificado."""
+        if position not in self._touched:
             return self.obsp.blob(position)
         encoded = self._encoded.get(position)
         if encoded is None:
             encoded = self._encoded[position] = bod.encode(self.bod(position))
         return encoded
 
+    def is_modified(self, position: int) -> bool:
+        return position in self._touched and self.blob(position) != self.obsp.blob(position)
+
+    @property
+    def modified_positions(self) -> set[int]:
+        return {position for position in self._touched if self.is_modified(position)}
+
+    def baseline_tree(self, position: int) -> bod.BodDocument:
+        """Árbol de partida, decodificado aparte (nunca se edita)."""
+        tree = self._baseline_trees.get(position)
+        if tree is None:
+            tree = self._baseline_trees[position] = bod.decode(self.obsp.blob(position))
+        return tree
+
+    def changes(self, position: int, ref_label: diffing.RefLabel | None = None) -> list[Change]:
+        """Lo que difiere del árbol de partida, en términos legibles."""
+        if not self.is_modified(position):
+            return []
+        if ref_label is not None:
+            return diffing.diff_trees(self.baseline_tree(position), self.bod(position), ref_label)
+        cached = self._changes.get(position)
+        if cached is None or cached[0] != self.version:
+            cached = (self.version, diffing.diff_trees(self.baseline_tree(position), self.bod(position)))
+            self._changes[position] = cached
+        return cached[1]
+
+    @property
+    def change_count(self) -> int:
+        return sum(len(self.changes(position)) for position in self.modified_positions)
+
+    def edited_paths(self, position: int) -> set[tuple]:
+        return diffing.changed_paths(self.changes(position))
+
+    def pending_changes(self, ref_label: diffing.RefLabel | None = None) -> list[tuple[int, Change]]:
+        """(posición, cambio) de cada objeto modificado, en orden de índice."""
+        return [
+            (position, change)
+            for position in sorted(self.modified_positions)
+            for change in self.changes(position, ref_label)
+        ]
+
     def current_data(self) -> bytes:
         """El archivo completo tal como quedaría al guardar ahora."""
-        return rebuild(self.obsp, {position: self.blob(position) for position in self._originals})
+        return rebuild(self.obsp, {position: self.blob(position) for position in self.modified_positions})
 
-    # --- Ediciones -----------------------------------------------------------------------
+    # --- Ediciones de valores --------------------------------------------------------------
 
     def node_at(self, position: int, path: tuple) -> object:
         if self.objects[position].is_script:
@@ -171,6 +209,9 @@ class Document:
     def property_label(self, position: int, path: tuple) -> str:
         return bod.path_label(self.bod(position), path)
 
+    def _label(self, position: int, path: tuple) -> str:
+        return f"{self.objects[position].label()} · {self.property_label(position, path)}"
+
     def edit(self, position: int, path: tuple, state: State) -> EditGroup | None:
         """Aplica un estado nuevo ya validado; devuelve ``None`` si no cambia nada."""
         node = self.node_at(position, path)
@@ -179,10 +220,7 @@ class Document:
             return None
         if isinstance(node, bod.ExternalRef) and state not in self._by_identity:
             raise EditError(f"No existe ningún objeto {identity_text(*state)} en este archivo")  # type: ignore[misc]
-        label = f"{self.objects[position].label()} · {self.property_label(position, path)}"
-        group = EditGroup((ValueEdit(position, path, before, state),), f"Editar {label}")
-        self._push(group)
-        return group
+        return self._push(EditGroup((ValueEdit(position, path, before, state),), f"Editar {self._label(position, path)}"))
 
     def edit_text(
         self, position: int, path: tuple, text: str, dictionary: HashDictionary | None = None
@@ -191,28 +229,104 @@ class Document:
         return self.edit(position, path, edits.parse_state(self.node_at(position, path), text, dictionary))
 
     def revert_property(self, position: int, path: tuple) -> EditGroup | None:
-        original = self._originals.get(position, {}).get(path)
-        if original is None:
-            return None
-        group = self.edit(position, path, original)
-        if group is not None:
-            group = EditGroup(group.edits, f"Revertir {self.objects[position].label()} · "
-                                           f"{self.property_label(position, path)}")
-            self._undo[-1] = group
-        return group
+        """Devuelve una hoja a su valor de partida, si en ese sitio hubo un cambio de valor."""
+        for change in self.changes(position):
+            if change.kind == "valor" and change.path == path:
+                node = self.node_at(position, path)
+                operation = ValueEdit(position, path, edits.get_state(node), change.original_state)
+                return self._push(EditGroup((operation,), f"Revertir {self._label(position, path)}"))
+        return None
 
     def revert_object(self, position: int) -> EditGroup | None:
-        originals = self._originals.get(position)
-        if not originals:
+        if not self.is_modified(position):
             return None
+        fresh = bod.decode(self.obsp.blob(position))
+        operation = ReplaceTree(position, self.bod(position), fresh)
+        return self._push(EditGroup((operation,), f"Revertir {self.objects[position].label()}"))
+
+    # --- Ediciones estructurales (fase 5) ------------------------------------------------
+
+    def _sequence_item(self, position: int, path: tuple) -> tuple[object, list]:
+        if self.objects[position].is_script:
+            raise EditError("Los scripts compilados son de solo lectura")
+        found = edits.structural_parent(self.bod(position), path)
+        if found is None:
+            raise EditError("Solo los elementos de una lista o las entradas de un mapa se pueden duplicar, "
+                            "quitar o mover (las tuplas tienen tamaño fijo)")
+        container, node = found
+        return node, container.items  # type: ignore[attr-defined]
+
+    def duplicate_item(self, position: int, path: tuple) -> EditGroup:
+        """Inserta una copia del elemento justo detrás de él."""
+        node, _items = self._sequence_item(position, path)
+        copy = bod.clone(node)
+        operation = InsertItem(position, path[:-1], path[-1] + 1, copy)
+        return self._push(EditGroup((operation,), f"Duplicar {self._label(position, path)}"))
+
+    def remove_item(self, position: int, path: tuple) -> EditGroup:
+        node, _items = self._sequence_item(position, path)
+        label = self._label(position, path)
+        return self._push(EditGroup((RemoveItem(position, path[:-1], path[-1], node),), f"Eliminar {label}"))
+
+    def move_item(self, position: int, path: tuple, delta: int) -> EditGroup | None:
+        """Sube (``delta`` < 0) o baja un elemento; ``None`` si ya está en el extremo."""
+        _node, items = self._sequence_item(position, path)
+        source = path[-1]
+        target = source + delta
+        if not 0 <= target < len(items):
+            return None
+        label = self._label(position, path)
+        verb = "Subir" if delta < 0 else "Bajar"
+        return self._push(EditGroup((MoveItem(position, path[:-1], source, target),), f"{verb} {label}"))
+
+    def set_null(self, position: int, path: tuple) -> EditGroup:
+        if self.objects[position].is_script:
+            raise EditError("Los scripts compilados son de solo lectura")
         tree = self.bod(position)
-        changes = tuple(
-            ValueEdit(position, path, edits.get_state(bod.resolve(tree, path)), original)
-            for path, original in sorted(originals.items())
-        )
-        group = EditGroup(changes, f"Revertir {self.objects[position].label()}")
-        self._push(group)
-        return group
+        if not edits.can_null(tree, path):
+            raise EditError("Solo un objeto o una referencia (fuera de tuplas y de claves) puede pasar a nulo")
+        node = bod.resolve(tree, path)
+        operation = ReplaceValue(position, path, node, bod.Null())
+        return self._push(EditGroup((operation,), f"Poner a nulo {self._label(position, path)}"))
+
+    def copy_node(self, position: int, path: tuple) -> object:
+        """Copia profunda de un nodo del árbol actual, lista para insertarla en otro sitio."""
+        return bod.clone(self.node_at(position, path))
+
+    def copy_example(self, position: int, path: tuple, class_label: str) -> bod.BodObject:
+        """Copia el objeto de ejemplo que señala el índice de huecos.
+
+        El índice describe el archivo de partida, así que el ejemplo se toma del árbol
+        de partida, no del editado (que pudo haberlo anulado o movido).
+        """
+        if self.objects[position].is_script:
+            raise EditError("Los scripts compilados son de solo lectura")
+        try:
+            node = bod.resolve(self.baseline_tree(position), path)
+        except IndexError:
+            node = None
+        if not isinstance(node, bod.BodObject) or node.cls.label() != class_label:
+            raise EditError(
+                "Ese ejemplo ya no está donde lo registró el índice (el objeto cambió al guardar). "
+                "Vuelve a abrir el archivo para actualizar el índice."
+            )
+        copy = bod.clone(node)
+        assert isinstance(copy, bod.BodObject)
+        return copy
+
+    def fill_null(self, position: int, path: tuple, value: object) -> EditGroup:
+        """Pone ``value`` (un objeto ya copiado o una referencia) donde ahora hay un nulo."""
+        node = self.node_at(position, path)
+        if not isinstance(node, bod.Null):
+            raise EditError("Ahí no hay un nulo")
+        if not isinstance(value, (bod.BodObject, bod.ExternalRef)):
+            raise EditError("Un nulo solo se rellena con un objeto o una referencia")
+        if isinstance(value, bod.ExternalRef) and value.identity not in self._by_identity:
+            raise EditError(f"No existe ningún objeto {identity_text(*value.identity)} en este archivo")
+        operation = ReplaceValue(position, path, node, value)
+        return self._push(EditGroup((operation,), f"Rellenar {self._label(position, path)}"))
+
+    # --- Deshacer ----------------------------------------------------------------------------
 
     def undo(self) -> EditGroup | None:
         if not self._undo:
@@ -238,41 +352,27 @@ class Document:
     def redo_description(self) -> str | None:
         return self._redo[-1].description if self._redo else None
 
-    def _push(self, group: EditGroup) -> None:
+    def _push(self, group: EditGroup) -> EditGroup:
         self._apply(group, forward=True)
         self._undo.append(group)
         self._redo.clear()
+        return group
 
     def _apply(self, group: EditGroup, *, forward: bool) -> None:
-        changes = group.edits if forward else tuple(reversed(group.edits))
-        for change in changes:
-            self._set(change.position, change.path, change.after if forward else change.before)
+        operations = group.edits if forward else tuple(reversed(group.edits))
+        for operation in operations:
+            position = operation.position
+            if isinstance(operation, ReplaceTree):
+                self._bod_cache[position] = operation.after if forward else operation.before
+            elif forward:
+                operation.apply(self.bod(position))
+            else:
+                operation.revert(self.bod(position))
+            self._touched.add(position)
+            self._encoded.pop(position, None)
         self.version += 1
 
-    def _set(self, position: int, path: tuple, state: State) -> None:
-        node = self.node_at(position, path)
-        originals = self._originals.setdefault(position, {})
-        if path not in originals:
-            originals[path] = edits.get_state(node)
-        edits.set_state(node, state)
-        if originals[path] == state:
-            del originals[path]
-        if not originals:
-            del self._originals[position]
-        self._encoded.pop(position, None)
-
-    def edited_paths(self, position: int) -> set[tuple]:
-        return set(self._originals.get(position, ()))
-
-    def pending_changes(self) -> list[tuple[int, tuple, object, State, State]]:
-        """(posición, ruta, nodo, estado original, estado actual) de cada propiedad cambiada."""
-        result = []
-        for position in sorted(self._originals):
-            tree = self.bod(position)
-            for path, original in sorted(self._originals[position].items()):
-                node = bod.resolve(tree, path)
-                result.append((position, path, node, original, edits.get_state(node)))
-        return result
+    # --- Decodificación ----------------------------------------------------------------------
 
     def bod(self, position: int) -> bod.BodDocument:
         """Árbol BOD del objeto, decodificado una sola vez.

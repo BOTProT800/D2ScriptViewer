@@ -102,6 +102,17 @@ def desc_document() -> BodDocument:
             F("Label", RawString("")),
             # Con aspecto de identificador: la edición pide confirmación.
             F("ItemID", Int32.of(1234)),
+            # Lista de objetos con un *ID único: duplicar un elemento debe avisar.
+            F(
+                "Slots",
+                BodList(
+                    bod.MODE_VALUES,
+                    [
+                        BodObject(3, native("Slot"), [F("SlotID", Int32.of(1)), F("Count", Int32.of(5))]),
+                        BodObject(4, native("Slot"), [F("SlotID", Int32.of(2)), F("Count", Int32.of(7))]),
+                    ],
+                ),
+            ),
         ],
     )
     return BodDocument(4, 1, root)

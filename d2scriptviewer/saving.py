@@ -38,6 +38,7 @@ from .document import Document
 from .errors import D2ScriptViewerError, FormatError, SaveError
 from .formats import bod
 from .formats.obsp import STEAM_ORIGINAL_SHA256, ObspFile
+from .validation import validate
 
 ORIGINAL_SUFFIX = ".original.obsp"
 TMP_SUFFIX = ".tmp"
@@ -128,16 +129,27 @@ class SavePlan:
     source: ObspFile
     modified: dict[int, bytes]
     """Posición → blob esperado de cada objeto modificado."""
+    warnings: list[str] = field(default_factory=list)
+    """Avisos de la validación que no impiden guardar (la interfaz pide confirmación)."""
 
 
 def prepare_save(document: Document) -> SavePlan:
-    """Paso 1: construye el archivo en memoria. Rápido; se llama desde la interfaz."""
+    """Paso 1: valida y construye el archivo en memoria. Rápido; se llama desde la interfaz.
+
+    Los errores de validación (claves repetidas, referencias sin destino) impiden
+    guardar; los avisos viajan en el plan.
+    """
+    report = validate(document)
+    if report.errors:
+        listed = "\n".join(f"• {error}" for error in report.errors[:20])
+        more = f"\n… y {len(report.errors) - 20} más" if len(report.errors) > 20 else ""
+        raise SaveError(f"No se puede guardar todavía:\n{listed}{more}")
     modified = {position: document.blob(position) for position in document.modified_positions}
     try:
         data = document.current_data()
     except FormatError as error:
         raise SaveError(f"No se pudo construir el archivo: {error}") from error
-    return SavePlan(data, sha256(data), document.obsp, modified)
+    return SavePlan(data, sha256(data), document.obsp, modified, list(report.warnings))
 
 
 def verify_plan(plan: SavePlan) -> None:

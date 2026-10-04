@@ -45,6 +45,7 @@ class PropertyView(ttk.Frame):
         on_edit_text: EditText | None = None,
         on_pick_reference: Callable[[object, tuple], None] | None = None,
         on_revert_property: Callable[[tuple], None] | None = None,
+        on_structure: Callable[[str, tuple], None] | None = None,
         hint: Hint | None = None,
         suggest: Callable[[str], list[str]] | None = None,
     ) -> None:
@@ -54,6 +55,8 @@ class PropertyView(ttk.Frame):
         self.on_edit_text = on_edit_text
         self.on_pick_reference = on_pick_reference
         self.on_revert_property = on_revert_property
+        #: (acción, ruta): ``duplicate``, ``remove``, ``up``, ``down``, ``null`` o ``fill``.
+        self.on_structure = on_structure
         self.hint = hint
         self.suggest = suggest
         self.document: bod.BodDocument | None = None
@@ -102,6 +105,13 @@ class PropertyView(ttk.Frame):
         self.tree.bind("<F2>", lambda _event: self.begin_edit() or "break")
         self.tree.bind("<Button-3>", self._on_context_menu)
         self.tree.bind("<MouseWheel>", lambda _event: self.cancel_edit())
+        for sequence, action in (
+            ("<Control-d>", "duplicate"),
+            ("<Delete>", "remove"),
+            ("<Alt-Up>", "up"),
+            ("<Alt-Down>", "down"),
+        ):
+            self.tree.bind(sequence, lambda _event, action=action: self._structure_key(action))
         self.bind("<Configure>", lambda event: self.hint_label.configure(wraplength=max(event.width - 30, 200)))
 
     # --- Contenido -----------------------------------------------------------------------
@@ -139,6 +149,30 @@ class PropertyView(ttk.Frame):
     def set_edited(self, paths: set[tuple]) -> None:
         self.edited_paths = set(paths)
         self.refresh_values()
+
+    def rebuild(self, title: str, document: bod.BodDocument, edited_paths: set[tuple], focus: tuple | None) -> None:
+        """Vuelve a pintar el árbol tras un cambio de estructura, con los nodos abiertos de antes."""
+        opened = [
+            item[1]
+            for iid, item in self._items.items()
+            if len(item) == 2 and self.tree.exists(iid) and self.tree.item(iid, "open")
+        ]
+        top = self.tree.yview()[0]
+        self.show_bod(title, document, edited_paths)
+        for path in sorted(opened, key=len):
+            self.expand(path)
+        if focus:
+            self.reveal(focus)
+        else:
+            self.tree.yview_moveto(top)
+
+    def expand(self, path: tuple) -> None:
+        """Abre el nodo de ``path`` si todavía existe en el árbol."""
+        self.reveal(path, select=False)
+        iid = self._iid_by_path.get(path)
+        if iid is not None:
+            self._populate(iid)
+            self.tree.item(iid, open=True)
 
     def refresh_values(self) -> None:
         """Vuelve a pintar las filas visibles (tras editar, deshacer o revertir)."""
@@ -208,8 +242,8 @@ class PropertyView(ttk.Frame):
     def _on_open(self, _event: object = None) -> None:
         self._populate(self.tree.focus())
 
-    def reveal(self, path: tuple) -> None:
-        """Abre el árbol hasta ``path`` y selecciona esa fila."""
+    def reveal(self, path: tuple, select: bool = True) -> None:
+        """Abre el árbol hasta ``path`` y, si ``select``, selecciona esa fila."""
         if self.document is None:
             return
         parent = ""
@@ -229,7 +263,7 @@ class PropertyView(ttk.Frame):
                 self._populate(iid)
                 self.tree.item(iid, open=True)
             parent = iid
-        if parent:
+        if parent and select:
             self.tree.selection_set(parent)
             self.tree.focus(parent)
             self.tree.see(parent)
@@ -254,16 +288,29 @@ class PropertyView(ttk.Frame):
             return
         node, path = selected
         warning = edits.identifier_warning(edits.field_name(self.document, path), node) if edits.is_editable(node) else None
+        actions = self.structure_actions(node, path)
+        structure = ""
+        if "duplicate" in actions:
+            structure = " · Ctrl+D duplica, Supr elimina, Alt+↑/↓ mueve"
+        if "null" in actions:
+            structure += " · clic derecho: poner a nulo"
+        if "fill" in actions:
+            structure += " · clic derecho: rellenar con un objeto"
         if warning:
             self.set_hint(warning, "warn")
         elif isinstance(node, bod.ExternalRef):
-            self.set_hint("Doble clic o Intro para ir al destino · F2 para cambiar la referencia")
+            self.set_hint("Doble clic o Intro para ir al destino · F2 para cambiar la referencia" + structure)
         elif isinstance(node, bod.HashedString):
-            self.set_hint("F2 o doble clic para elegir otra cadena ya presente en el archivo (distingue mayúsculas)")
+            self.set_hint("F2 o doble clic para elegir otra cadena ya presente en el archivo (distingue mayúsculas)"
+                          + structure)
         elif edits.is_editable(node):
-            self.set_hint("Doble clic o F2 para editar")
+            self.set_hint("Doble clic o F2 para editar" + structure)
+        elif structure:
+            self.set_hint(structure.removeprefix(" · ").capitalize())
+        elif isinstance(node, bod.BodTuple) or (path and isinstance(bod.resolve(self.document, path[:-1]), bod.BodTuple)):
+            self.set_hint("Las tuplas tienen tamaño fijo en el juego: solo se editan sus valores")
         else:
-            self.set_hint("Las listas, objetos y nulos no se editan todavía (fase 5)")
+            self.set_hint("")
 
     def _on_double_click(self, event: tk.Event) -> str | None:
         if self.tree.identify_element(event.x, event.y).endswith("indicator"):
@@ -308,7 +355,8 @@ class PropertyView(ttk.Frame):
             return
         node, path = selected
         if not edits.is_editable(node):
-            self.set_hint("Este valor no se puede editar todavía: listas, objetos y nulos llegan en la fase 5", "warn")
+            self.set_hint("Este valor no se edita escribiendo: usa el clic derecho para las operaciones de estructura",
+                          "warn")
             return
         if isinstance(node, bod.ExternalRef):
             if self.on_pick_reference is not None:
@@ -364,10 +412,65 @@ class PropertyView(ttk.Frame):
             menu.add_command(label="Editar", accelerator="F2", command=self.begin_edit)
         if path in self.edited_paths and self.on_revert_property is not None:
             menu.add_command(label="Revertir esta propiedad", command=lambda: self.on_revert_property(path))
+        self._add_structure_entries(menu, node, path)
         menu.add_separator()
         menu.add_command(label="Copiar valor", command=lambda: self._copy(self._value_text(node)))
         menu.add_command(label="Copiar ruta de la propiedad", command=lambda: self._copy(bod.path_label(self.document, path)))
         menu.tk_popup(event.x_root, event.y_root)
+
+    def structure_actions(self, node: object, path: tuple) -> list[str]:
+        """Acciones estructurales que admite la fila (decisiones de la fase 5)."""
+        if self.document is None or self.on_structure is None:
+            return []
+        actions = []
+        found = edits.structural_parent(self.document, path)
+        if found is not None:
+            container, _node = found
+            actions += ["duplicate", "remove"]
+            if path[-1] > 0:
+                actions.append("up")
+            if path[-1] < len(container.items) - 1:  # type: ignore[attr-defined]
+                actions.append("down")
+        if edits.can_null(self.document, path):
+            actions.append("null")
+        if isinstance(node, bod.Null) and path:
+            parent = bod.resolve(self.document, path[:-1])
+            if not isinstance(parent, bod.BodTuple) and not (isinstance(parent, bod.Pair) and path[-1] == 0):
+                actions.append("fill")
+        return actions
+
+    def _add_structure_entries(self, menu: tk.Menu, node: object, path: tuple) -> None:
+        actions = self.structure_actions(node, path)
+        if not actions:
+            return
+        menu.add_separator()
+        labels = {
+            "duplicate": ("Duplicar elemento", "Ctrl+D"),
+            "remove": ("Eliminar elemento", "Supr"),
+            "up": ("Subir", "Alt+↑"),
+            "down": ("Bajar", "Alt+↓"),
+            "null": ("Poner a nulo", ""),
+            "fill": ("Rellenar con un objeto…", ""),
+        }
+        assert self.on_structure is not None
+        for action in actions:
+            label, accelerator = labels[action]
+            menu.add_command(
+                label=label,
+                accelerator=accelerator,
+                command=lambda action=action: self.on_structure(action, path),  # type: ignore[misc]
+            )
+
+    def _structure_key(self, action: str) -> str | None:
+        if self.editing:
+            return None
+        selected = self.selected()
+        if selected is None:
+            return "break"
+        node, path = selected
+        if action in self.structure_actions(node, path) and self.on_structure is not None:
+            self.on_structure(action, path)
+        return "break"
 
     def _copy(self, text: str) -> None:
         self.clipboard_clear()
