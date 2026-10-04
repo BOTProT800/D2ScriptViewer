@@ -24,10 +24,10 @@ archivo guardado por la herramienta, también con otro tamaño y los offsets rec
 restaurar devuelve el SHA de Steam (`research/PRUEBAS_EN_JUEGO.md`). Fase 5 (edición
 estructural) cerrada y validada en el juego: el juego tolera que se renumeren los objetos `07`
 de un BOD. Sus decisiones (tuplas fijas, nulos solo en huecos de objeto, qué bloquea y qué avisa
-al guardar) están al principio del plan. Fase 6: la función de hash está identificada (un
-CRC-64 reflejado, deducido de los datos) e implementada, y los valores `0F` admiten cadenas
-nuevas con aviso; falta la prueba en el juego para cerrarla. Después vienen las fases 7
-(scripts), 8 (exportación y parches) y 9 (distribución), en ese orden. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+al guardar) están al principio del plan. Fase 6 cerrada y validada en el juego: la función de hash
+es un CRC-64 reflejado (deducido de los datos), los valores `0F` admiten cadenas nuevas con
+aviso, y el juego usa una cadena nueva para encontrar una animación del `.upak`. Siguen las
+fases 7 (scripts), 8 (exportación y parches) y 9 (distribución), en ese orden. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 

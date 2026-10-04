@@ -20,6 +20,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 - `verify` comprueba la función de hash en todos los pares y que `idObjeto` es el hash del
   nombre en minúsculas. Guardar se bloquea si un hash de la tabla de cadenas o de un objeto
   modificado no cuadra con su texto.
+- Prueba en el juego de una cadena nueva (`research/PRUEBAS_EN_JUEGO.md`): tres
+  `AnimationName` de Death apuntan a `D_WScy_Combo04`, una animación del `.upak` que no aparecía
+  en `scripts.obsp`, y el juego la reproduce.
 - Edición estructural de BOD (fase 5): duplicar, eliminar, subir y bajar elementos de listas y
   entradas de mapas (Ctrl+D, Supr, Alt+↑/↓, clic derecho o Editar → Estructura); poner a nulo un
   objeto o una referencia; rellenar un nulo con la copia de un objeto de una clase que ya aparece

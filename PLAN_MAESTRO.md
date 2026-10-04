@@ -1,5 +1,31 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 6 cerrada (2026-10-04)** con la prueba en el juego (detalle en
+> `research/PRUEBAS_EN_JUEGO.md`). El usuario cambió tres `AnimationName` de
+> `death/death_animations` (`Jump`, `JumpF` y `PaperDoll_Idle`) a la cadena nueva
+> `D_WScy_Combo04`: un combo de guadaña que está en el paquete de Death del `.upak` pero que no
+> aparecía en `scripts.obsp`. Informó de que el salto y el muñeco del menú reproducen el combo,
+> sin cierres ni congelaciones del juego. El muñeco se queda en el último fotograma al terminar,
+> porque el combo no está en bucle (hipótesis). La versión jugada (SHA `D976CDED…`) coincide con
+> el ensayo. El archivo no se había restaurado; con autorización del usuario, Claude ejecutó
+> `saving.restore_original`, que devolvió `B46DD3DA…`.
+>
+> Criterios de «Hecho cuando»:
+>
+> 1. Función en `hashes.py` con sus parámetros en el apéndice A.4; tests con los 70 182 pares y
+>    los 7 862 objetos, y tests sintéticos (valor de control, cadena vacía, mayúsculas,
+>    referencia bit a bit, estructura lineal) con fixtures de hashes reales: sí.
+> 2. `verify` comprueba la función y las identidades, y guardar se bloquea con un hash que no
+>    cuadra: sí.
+> 3. Cadenas nuevas en `0F` con aviso y confirmación; editar y deshacer devuelve `B46DD3DA…` y el
+>    archivo guardado pasa `verify`: sí, por tests, también con el archivo real.
+> 4. `python -m d2scriptviewer hash` y la pista del hash en el editor: sí.
+> 5. Sección 2.4, apéndice A, `research/FORMATO.md`, `CLAUDE.md` y `CHANGELOG.md`: sí.
+> 6. El juego carga la cadena nueva y refleja su efecto; restaurar devuelve `B46DD3DA…`: sí.
+>
+> 171 tests. Siguiente paso: la fase 7 (scripts compilados), empezando por analizar los datos y
+> acordar con el usuario los criterios y hasta dónde investigar.
+>
 > **Fase 6: función de hash identificada (2026-10-04)** solo con los datos del archivo, en el
 > paso de análisis y sin vías externas (ni código ajeno, ni Ghidra, ni la DLL):
 >

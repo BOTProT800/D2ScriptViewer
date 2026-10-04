@@ -157,3 +157,74 @@ codificador los renumere: con 3 objetos insertados al principio de la lista de e
 movimiento de Death, el estado «Jump» (índice 585 → 588) se lee bien y refleja su cambio.
 También tolera un estado repetido idéntico, con el mismo `Name` e `ID`. Insertar, eliminar y
 mover objetos dentro de un BOD es viable.
+
+## Fase 6 — cadena con hash nueva (2026-10-04)
+
+Comprueba que el juego acepta una cadena `0F` que no aparecía en `scripts.obsp`, con el hash que
+calcula la herramienta (CRC-64, apéndice A.4 del plan), y que la usa. Para que se vea el efecto,
+la cadena nombra un recurso que está fuera de `scripts.obsp`: una animación del paquete
+`media/characters/death` de `media.upak`, listado en solo lectura con Darkstractor.
+
+### Edición elegida
+
+- **Recurso:** `D_WScy_Combo04.anm` (33 820 bytes), un combo de guadaña. Es una de las 44
+  animaciones del paquete de Death cuyo nombre no aparece en ninguna de las 70 182 cadenas de
+  `scripts.obsp`: el juego la trae pero ningún `AnimationDesc` la nombra.
+- **Objeto:** `death/death_animations` (`AnimationList`, posición 3 107). En 912 de sus 968
+  `AnimationName` (tag `0F`), el valor es el nombre de un `.anm` de ese paquete.
+- **Cambios**, los tres con la misma cadena nueva `D_WScy_Combo04` (hash `01A97E58BABBD7A8`):
+  - `Animations[339].AnimationName` (`Name` = `Jump`): `D_Jump` → `D_WScy_Combo04`;
+  - `Animations[344].AnimationName` (`Name` = `JumpF`): `D_JumpF` → `D_WScy_Combo04`;
+  - `Animations[435].AnimationName` (`Name` = `PaperDoll_Idle`): `D_Idle` → `D_WScy_Combo04`.
+- **En el ensayo**, sobre una copia en una carpeta temporal: la herramienta avisa de que la
+  cadena es nueva y pide confirmación; el archivo pasa de 18 334 463 a 18 334 483 bytes (+20, la
+  definición de la cadena nueva en la tabla del BOD); `verify` da correcto; releer muestra los
+  tres valores; el SHA del archivo guardado empieza por `D976CDED1A44DD32`; restaurar devuelve
+  `B46DD3DA…`.
+- **Efecto esperado:** el salto normal sin armas, parado (`Jump`) o corriendo (`JumpF`),
+  reproduce el combo de guadaña en lugar de la animación de salto, y el muñeco de Death en la
+  pantalla de personaje o inventario (`PaperDoll_Idle`) hace el combo en vez de estar quieto.
+- **Hipótesis:**
+  - que el controlador de animaciones elija `Jump` y `JumpF` para el salto sin armas, y
+    `WScy_Jump` con la guadaña en la mano (sin tocar), se deduce de los nombres;
+  - que `PaperDoll_Idle` sea el muñeco del menú, también;
+  - que el juego cargue todas las animaciones del paquete, también las que nadie nombra, es parte
+    de lo que se prueba.
+
+  Si el salto o el muñeco se quedan congelados, en postura en T o sin animación, el juego no
+  encontró el recurso.
+- **Estado de la instalación antes de la prueba** (leído en solo lectura): `scripts.obsp`
+  original de Steam (`B46DD3DA…`, 15:19:43), `scripts.original.obsp` intacto (03:42:21) y 5
+  copias rotativas, la última de las 15:19:43.
+
+### Resultado (2026-10-04)
+
+El usuario hizo la prueba con la herramienta sobre el archivo instalado e informó de que «el
+comportamiento fue el esperado», sin cierres ni congelaciones del juego:
+
+- **Salto** (`Jump`, `JumpF`): reproduce el combo de guadaña en lugar del salto, como se esperaba.
+- **Muñeco del menú** (`PaperDoll_Idle`): hace el combo de guadaña (el usuario lo confirmó al
+  preguntarle) cada vez que se cambia de pantalla, y al terminar se queda congelado en el último
+  fotograma. **Hipótesis:** el combo no es una animación en bucle y ocupa un hueco que espera un
+  reposo en bucle, así que se detiene al acabar; no es un fallo de la herramienta.
+
+**Evidencia en la instalación**, leída después del informe y solo para leer:
+
+- **16:33:41, guardado.** `scripts.obsp` medía 18 334 483 bytes con SHA `D976CDED1A44DD32…`:
+  coincide byte a byte con el ensayo, así que la edición fue exactamente la prevista. La copia
+  rotativa `scripts.20261004-163341-909704.obsp` es el original de Steam (`B46DD3DA…`), la
+  versión previa.
+- **El archivo no estaba restaurado.** Con autorización del usuario, Claude ejecutó
+  `saving.restore_original` (el código de Archivo → Restaurar original) a las 16:41:24. La copia
+  rotativa `scripts.20261004-164124-148623.obsp` guarda la versión de la prueba (`D976CDED…`);
+  `scripts.obsp` volvió a 18 334 463 bytes con SHA `B46DD3DA…`, y `verify` da correcto.
+- **`scripts.original.obsp`:** sin cambios desde su creación (03:42:21, `B46DD3DA…`).
+- **Copias rotativas:** quedan las últimas 5; la poda borró las de las 03:49:17 y 03:55:03.
+
+### Conclusión
+
+El juego acepta una cadena con hash que no estaba en `scripts.obsp`, con el hash que calcula la
+herramienta, y la usa para encontrar un recurso de fuera del archivo: una animación que el juego
+trae pero que nada nombraba. También carga las animaciones del paquete que ningún
+`AnimationDesc` nombra. Esta prueba no distingue si el juego busca el recurso por el hash o por
+el texto; la función ya estaba comprobada con los 70 182 pares.
