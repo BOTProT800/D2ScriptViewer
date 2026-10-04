@@ -27,9 +27,14 @@
 > 6. El juego carga el archivo guardado y refleja un cambio comprobable; restaurar devuelve
 >    `B46DD3DA…`: sí.
 >
-> Medido al cierre: 126 tests sin omisiones y `verify` en 2,9 s. **Desviación:** la CI sigue sin
-> ejecutarse en GitHub (no hay remoto); se reproduce en local con Python 3.12. Siguiente paso,
-> según la sección 11: fases 5 a 9, según interés.
+> Medido al cierre: 127 tests sin omisiones y `verify` en 2,9 s. **Corrección al cerrar:** un
+> test falló una vez de cada cinco ejecuciones y destapó un fallo real. Dos copias rotativas
+> creadas en el mismo intervalo del reloj de Windows recibían el mismo nombre y la segunda pisaba
+> a la primera. Ahora el nombre siempre es posterior a la última copia y se crea en modo
+> exclusivo: hay un test nuevo y 20 ejecuciones seguidas sin fallos. Las copias de la prueba en
+> el juego se crearon con minutos de diferencia y no se vieron afectadas.
+> **Desviación:** la CI sigue sin ejecutarse en GitHub (no hay remoto); se reproduce en local con
+> Python 3.12. Siguiente paso, según la sección 11: fases 5 a 9, según interés.
 >
 > Cambio de decisión (2026-10-04): se abandonó el mod de inventario de Darksiders2DLL
 > (`scripts=inventory`) y su código se eliminó de la DLL. La DLL ya no lee, fija ni redirige

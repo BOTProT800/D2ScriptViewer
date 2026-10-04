@@ -341,18 +341,43 @@ def ensure_original_copy(path: Path, current: bytes, result: SaveResult) -> None
         )
 
 
+_STAMP_FORMAT = "%Y%m%d-%H%M%S-%f"
+
+
 def rotate_backup(path: Path, previous: bytes, keep: int = KEEP_BACKUPS, now: _dt.datetime | None = None) -> tuple[Path, list[Path]]:
-    """Paso 5: guarda la versión anterior en ``.d2sv_backups`` y deja solo las ``keep`` más recientes."""
+    """Paso 5: guarda la versión anterior en ``.d2sv_backups`` y deja solo las ``keep`` más recientes.
+
+    El orden de los nombres es el orden cronológico, porque la poda borra los
+    primeros. En Windows el reloj avanza a saltos de milisegundos: si el instante
+    no es posterior a la última copia, se toma esa más un microsegundo. Además, la
+    copia se crea en modo exclusivo, así que nunca pisa otra.
+    """
     folder = backup_folder(path)
     folder.mkdir(exist_ok=True)
-    stamp = (now or _dt.datetime.now()).strftime("%Y%m%d-%H%M%S-%f")
     stem = path.name[: -len(path.suffix)] if path.suffix else path.name
-    backup = folder / f"{stem}.{stamp}{path.suffix}"
-    with open(backup, "wb") as handle:
+    pattern = f"{stem}.????????-??????-??????{path.suffix}"
+    moment = now or _dt.datetime.now()
+    previous_backups = sorted(folder.glob(pattern), key=lambda item: item.name)
+    if previous_backups:
+        stamp_text = previous_backups[-1].name[len(stem) + 1:len(stem) + 1 + 22]
+        try:
+            latest = _dt.datetime.strptime(stamp_text, _STAMP_FORMAT)
+        except ValueError:
+            latest = None
+        if latest is not None and moment <= latest:
+            moment = latest + _dt.timedelta(microseconds=1)
+    while True:
+        backup = folder / f"{stem}.{moment.strftime(_STAMP_FORMAT)}{path.suffix}"
+        try:
+            handle = open(backup, "xb")
+        except FileExistsError:
+            moment += _dt.timedelta(microseconds=1)
+            continue
+        break
+    with handle:
         handle.write(previous)
         handle.flush()
         os.fsync(handle.fileno())
-    pattern = f"{stem}.????????-??????-??????{path.suffix}"
     existing = sorted(folder.glob(pattern), key=lambda item: item.name)
     removed = []
     for old in existing[: max(len(existing) - keep, 0)]:

@@ -172,6 +172,25 @@ class SavingTests(TempDirMixin, unittest.TestCase):
         self.assertTrue(all(item.name.startswith("scripts.") and item.suffix == ".obsp" for item in backups))
         self.assertEqual([item.read_bytes() for item in backups], versions[-5:])
 
+    def test_rotating_backups_never_overwrite_each_other(self) -> None:
+        # En Windows dos guardados seguidos pueden caer en el mismo instante del reloj.
+        import datetime
+
+        moment = datetime.datetime(2026, 10, 4, 12, 0, 0, 500)
+        first, _ = saving.rotate_backup(self.target, b"uno", now=moment)
+        second, _ = saving.rotate_backup(self.target, b"dos", now=moment)
+        earlier, _ = saving.rotate_backup(self.target, b"tres", now=moment - datetime.timedelta(seconds=5))
+        self.assertEqual(first.read_bytes(), b"uno")
+        self.assertEqual(second.read_bytes(), b"dos")
+        self.assertEqual(earlier.read_bytes(), b"tres")
+        names = sorted(item.name for item in (self.folder / saving.BACKUP_DIR).iterdir())
+        self.assertEqual(names, [first.name, second.name, earlier.name])  # orden de nombre = orden real
+        for _ in range(5):
+            saving.rotate_backup(self.target, b"mas", now=moment)
+        kept = sorted((self.folder / saving.BACKUP_DIR).iterdir())
+        self.assertEqual(len(kept), saving.KEEP_BACKUPS)
+        self.assertEqual([item.read_bytes() for item in kept], [b"mas"] * 5)
+
     def test_rotating_backups_can_be_disabled(self) -> None:
         self.edit("Health", "5")
         result = saving.save_document(self.document, rotating_backups=False)

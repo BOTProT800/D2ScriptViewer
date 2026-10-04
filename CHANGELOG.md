@@ -55,3 +55,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 - Los floats se muestran en notación decimal (`200`, no `2e+02`) salvo en magnitudes extremas.
 - Darksiders2DLL ya no lee ni fija `scripts.obsp` (su modo `scripts=inventory` se retiró): el
   diálogo de guardado, el README y el plan dejan de mencionarlo.
+
+### Fixed
+
+- Dos copias rotativas creadas en el mismo instante del reloj (en Windows avanza a saltos de
+  milisegundos) recibían el mismo nombre y la segunda pisaba a la primera. Ahora el nombre
+  siempre es posterior a la última copia y el archivo se crea en modo exclusivo.
