@@ -45,8 +45,13 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 - Restaurar original, estado del archivo en la barra (original de Steam, modificado o
   desconocido), mensajes claros con el juego abierto, archivos de solo lectura o sin permisos,
   limpieza de un `.tmp` huérfano al abrir y pregunta de guardar al salir o al abrir otro archivo.
-- `research/PRUEBAS_EN_JUEGO.md` con el protocolo de la prueba en el juego.
+- `research/PRUEBAS_EN_JUEGO.md` con el protocolo y los resultados de la prueba en el juego: el
+  juego carga un `scripts.obsp` guardado por la herramienta, refleja la edición, acepta un
+  archivo de otro tamaño con los offsets recalculados, y restaurar devuelve el original de Steam.
+  Con eso se cierra el primer hito (fases 0 a 4).
 
 ### Changed
 
 - Los floats se muestran en notación decimal (`200`, no `2e+02`) salvo en magnitudes extremas.
+- Darksiders2DLL ya no lee ni fija `scripts.obsp` (su modo `scripts=inventory` se retiró): el
+  diálogo de guardado, el README y el plan dejan de mencionarlo.

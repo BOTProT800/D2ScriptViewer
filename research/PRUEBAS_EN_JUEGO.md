@@ -49,12 +49,53 @@ verificar con `verify`, releer y restaurar dieron los resultados esperados.
   `scripts.obsp`, verifica el resultado y vuelve a abrir el archivo.
 - **Esperado:** «Original de Steam» en la barra de estado y SHA `B46DD3DA…`.
 
-## Resultados
+## Resultados (2026-10-04)
 
-Pendientes: los registrará el usuario tras jugar.
+El usuario hizo las pruebas con la herramienta sobre el archivo instalado e informó de que «las
+tres funcionan». No dio más detalles (por ejemplo, la altura del salto), así que no se registran.
 
-| Prueba | Fecha | ¿Arranca y carga la partida? | ¿Efecto visible? | Incidencias |
-|---|---|---|---|---|
-| 1 — JumpImpulse 700 | | | | |
-| 2 — FlagID +5 bytes | | | | |
-| 3 — Restaurar | | | | |
+| Prueba | ¿Arranca y carga la partida? | ¿Efecto visible? | Evidencia en disco |
+|---|---|---|---|
+| 1 — JumpImpulse 700 | Sí (informe del usuario) | Sí (informe del usuario) | Guardado a las 03:42:21 |
+| 2 — FlagID +5 bytes | Sí (informe del usuario) | Sí: el juego funciona y el salto alto sigue (informe del usuario) | Guardado a las 03:49:17 |
+| 3 — Restaurar | — | Sí: SHA `B46DD3DA…` (ver abajo) | Restaurado a las 03:55:46 |
+
+### Evidencia leída en la instalación (solo lectura, tras el informe)
+
+- `scripts.original.obsp` (03:42:21, solo lectura): 18 334 463 bytes, SHA `B46DD3DA…`. La copia
+  del original se creó en el primer guardado y es idéntica al archivo previo.
+- `.d2sv_backups\scripts.20261004-034221-256623.obsp`: SHA `B46DD3DA…`, la versión previa al
+  primer guardado.
+- `.d2sv_backups\scripts.20261004-034917-262165.obsp`: SHA `48BF85EE6C7B9E6E…`, la versión de la
+  prueba 1; coincide con el ensayo.
+- `scripts.obsp` (03:49:17): 18 334 468 bytes, SHA `D9B222B4…`, con `JumpImpulse = 700` y
+  `FlagID = 'flag_quest_debug_question_asked_d2sv'`. Es el estado de la prueba 2: **no** está
+  restaurado. Una restauración con las copias rotativas activadas (lo están en la
+  configuración) habría dejado una copia de esta versión con una hora posterior, y no la hay.
+
+### Restauración (prueba 3)
+
+Con autorización del usuario, Claude restauró el archivo instalado con
+`saving.restore_original`, el mismo código que ejecuta Archivo → Restaurar original:
+
+1. **03:55:03.** Un guardado de la herramienta (no lo hizo Claude) guardó a un lado la versión de
+   la prueba 2 en `.d2sv_backups\scripts.20261004-035503-077071.obsp` (SHA `D9B222B4…`) y dejó
+   instalado el estado de la prueba 1 (SHA `48BF85EE…`). Es compatible con cerrar la ventana tras
+   deshacer el `FlagID` y responder «Guardar».
+2. **03:55:46.** La restauración guardó esa versión en
+   `.d2sv_backups\scripts.20261004-035546-944941.obsp` (SHA `48BF85EE…`), copió
+   `scripts.original.obsp` encima y releyó el resultado. `scripts.obsp` volvió a medir
+   18 334 463 bytes con SHA `B46DD3DA7F17A0ED016E30AF523BFBA86D358C9920DFFA866C69D4A0F4F67C7C`, la
+   barra de estado volvió a «Original de Steam» y `python -m d2scriptviewer verify` da todo correcto.
+3. `scripts.original.obsp` conserva la fecha de su creación (03:42:21) y su SHA `B46DD3DA…`: ni
+   los guardados de las 03:49:17 y 03:55:03 ni la restauración lo tocaron.
+
+### Conclusión
+
+- El juego carga un `scripts.obsp` guardado por D2ScriptViewer y refleja la edición.
+- El juego acepta un archivo con otro tamaño y los offsets del índice recalculados: no hay
+  checksum ni tamaño fijo que lo impida.
+- La copia del original es idéntica al archivo previo, y restaurarla devuelve el SHA de Steam.
+
+En la carpeta `media\` quedan `scripts.original.obsp` (copia permanente, de solo lectura) y
+`.d2sv_backups\` con cuatro versiones (unos 73 MB), que se pueden borrar.

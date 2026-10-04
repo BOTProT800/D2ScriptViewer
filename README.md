@@ -68,10 +68,8 @@ Los objetos de script compilado son de solo lectura.
 
 Avisos:
 
-- **Cierra Darksiders II antes de guardar.** Con el juego abierto (o con Darksiders2DLL
-  fijando el archivo) no se puede escribir, y la herramienta lo dice.
-- Darksiders2DLL en modo `scripts=inventory` exige el `scripts.obsp` original: restáuralo antes de
-  usar ese modo.
+- **Cierra Darksiders II antes de guardar.** Con el juego abierto no se puede escribir, y la
+  herramienta lo dice.
 - «Verificar integridad de los archivos» de Steam, o una actualización, devuelven el original.
 
 Línea de órdenes:

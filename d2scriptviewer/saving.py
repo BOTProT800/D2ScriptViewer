@@ -235,8 +235,8 @@ def _probe_write(path: Path) -> None:
 def check_writable(path: Path) -> None:
     """Paso 3: falla con un mensaje claro si el destino está bloqueado o protegido.
 
-    Abre el archivo para escritura sin modificarlo: con el juego abierto (o la DLL
-    fijándolo con ``FILE_SHARE_READ``) Windows lo impide.
+    Abre el archivo para escritura sin modificarlo: con el juego abierto (que lo abre
+    con ``FILE_SHARE_READ``) Windows lo impide.
     """
     if path.exists():
         if path.is_dir():

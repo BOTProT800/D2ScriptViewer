@@ -18,11 +18,11 @@ Exportar a JSON es secundario.
 Cuando se cierre una fase o cambie una decisión, actualízalo con una nota fechada al
 principio, como hace el plan de Darksiders2DLL.
 
-Estado al 4 de octubre de 2026: fases 0 (base del repositorio), 1 (núcleo de formato y CLI),
-2 (visor de solo lectura, con visto bueno del usuario) y 3 (edición de valores) cerradas. La
-fase 4 (guardado y copia del original) está implementada y espera la prueba en el juego que
-hace el usuario (protocolo en `research/PRUEBAS_EN_JUEGO.md`). Con su resultado se cierra el
-primer hito. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+Estado al 4 de octubre de 2026: **primer hito cerrado** (fases 0 a 4): visor, edición de
+valores y guardado en `.obsp` con copia del original, validados en el juego. El juego carga un
+archivo guardado por la herramienta, también con otro tamaño y los offsets recalculados, y
+restaurar devuelve el SHA de Steam (`research/PRUEBAS_EN_JUEGO.md`). Lo siguiente son las fases
+5 a 9, a elección del usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -178,10 +178,11 @@ encuentran.
 - **Copia para experimentos**: `C:\Users\vicen\Documents\Extractions\Darksiders\scripts.obsp`,
   idéntica al original.
 - **`..\Darksiders2DLL`** (C++, proxy `dinput8.dll`):
-  - Mientras el juego corre fija `scripts.obsp` con `FILE_SHARE_READ`, así que guardar fallará.
-  - Su modo `scripts=inventory` exige que el `scripts.obsp` instalado sea el original (por SHA).
-  - `research/INVENTORY_SCRIPT.md` documenta el único patrón de bytecode confirmado:
-    `NumSlots\0`, `0x23` + int32 y luego `0x29 0x32`, con offsets en `death/death`.
+  - No lee, fija ni redirige `scripts.obsp`: su mod de inventario (`scripts=inventory`) se
+    abandonó y eliminó el 4 de octubre de 2026. No propongas avisos ni trabajo sobre ese modo.
+  - El juego abre `scripts.obsp` con `FILE_SHARE_READ`; con el juego abierto, guardar fallará.
+  - `research/INVENTORY_SCRIPT.md` (conservado como investigación) documenta el único patrón de
+    bytecode confirmado: `NumSlots\0`, `0x23` + int32 y luego `0x29 0x32`, con offsets en `death/death`.
 - **`..\Darkstractor`** (Python stdlib + tkinter): referencia de estilo, estructura del
   repositorio, CI y tests.
 - **Para la fase 7**: `Darksiders2.exe` contiene el compilador del lenguaje de scripts, con

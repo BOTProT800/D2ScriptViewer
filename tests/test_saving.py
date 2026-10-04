@@ -145,7 +145,7 @@ class SavingTests(TempDirMixin, unittest.TestCase):
         ]
         kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
         generic_read, file_share_read, open_existing = 0x80000000, 0x1, 3
-        # Como el juego con Darksiders2DLL: lectura y solo se comparte la lectura.
+        # Como el juego: lectura y solo se comparte la lectura.
         handle = kernel32.CreateFileW(str(self.target), generic_read, file_share_read, None, open_existing, 0, None)
         self.assertNotIn(handle, (None, ctypes.c_void_p(-1).value))
         try:

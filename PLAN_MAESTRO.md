@@ -1,6 +1,44 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
-> Fase 4 implementada (2026-10-04), pendiente de la prueba en el juego (punto de control 2):
+> **Primer hito cerrado (2026-10-04): fases 0 a 4.** Fase 4 cerrada con la prueba en el juego
+> (detalle en `research/PRUEBAS_EN_JUEGO.md`):
+>
+> - El usuario guardó con la herramienta, sobre el `scripts.obsp` instalado, `JumpImpulse` del
+>   estado «Jump» 350 → 700 (mismo tamaño) y después un `FlagID` de `base/quest_test_dialog`
+>   alargado 5 bytes, que desplaza los offsets de 7 813 objetos.
+> - Informó de que el juego carga los dos archivos y refleja el cambio.
+> - La prueba de restaurar no había quedado aplicada en el archivo instalado. Con autorización
+>   del usuario, Claude ejecutó `saving.restore_original` (el código de Archivo → Restaurar
+>   original). El resultado: SHA `B46DD3DA…`, 18 334 463 bytes y `verify` correcto.
+> - `scripts.original.obsp` (SHA `B46DD3DA…`) no cambió desde que se creó en el primer guardado.
+>
+> Criterios de la sección 10:
+>
+> 1. Abre el archivo del juego o una copia y navega los 7 862 objetos: sí (fase 2; mostrados
+>    uno a uno, el peor en 0,22 s).
+> 2. Propiedades BOD, metadatos y símbolos de los scripts: sí.
+> 3. Edita int, float, bool, cadenas sin hash, cadenas conocidas y referencias, con deshacer: sí
+>    (fase 3).
+> 4. Guarda en `.obsp`; el primer guardado crea `scripts.original.obsp` idéntico al previo (SHA
+>    verificado) y los siguientes no lo tocan: sí, por test y en la instalación (copia de
+>    las 03:42:21 intacta tras los guardados de las 03:49 y 03:55).
+> 5. Objetos no editados idénticos byte a byte; editar y revertir da el archivo idéntico: sí (tests
+>    de oro, de edición y de guardado, también con el archivo real).
+> 6. El juego carga el archivo guardado y refleja un cambio comprobable; restaurar devuelve
+>    `B46DD3DA…`: sí.
+>
+> Medido al cierre: 126 tests sin omisiones y `verify` en 2,9 s. **Desviación:** la CI sigue sin
+> ejecutarse en GitHub (no hay remoto); se reproduce en local con Python 3.12. Siguiente paso,
+> según la sección 11: fases 5 a 9, según interés.
+>
+> Cambio de decisión (2026-10-04): se abandonó el mod de inventario de Darksiders2DLL
+> (`scripts=inventory`) y su código se eliminó de la DLL. La DLL ya no lee, fija ni redirige
+> `scripts.obsp`, así que editar el archivo instalado no entra en conflicto con ella. Se quitaron
+> el aviso del diálogo de guardado, el caso especial de la sección 4.3 y su riesgo en la sección 9;
+> se actualizaron las secciones 2.1 y 13 y el apéndice B. `research/INVENTORY_SCRIPT.md` de la DLL
+> se conserva como investigación del formato (patrón `NumSlots` y offsets de `death/death`).
+>
+> Fase 4 implementada (2026-10-04), antes de la prueba en el juego (punto de control 2):
 > `saving.py` sigue la sección 4. Construye en `prepare_save` y autoverifica en `verify_plan`
 > (mismos objetos e identidades, blobs sin editar idénticos y editados iguales al árbol).
 > Comprueba que el destino se puede escribir con `CreateFileW` vía `ctypes`, que distingue
@@ -15,7 +53,7 @@
 > guardar, `Document.mark_saved` toma el archivo escrito como nueva base sin perder el
 > historial de deshacer. Tests (126 en total): la copia se crea una sola vez y nunca se toca;
 > un fallo simulado en cada paso previo a la sustitución deja el destino intacto y sin `.tmp`;
-> un handle con `FILE_SHARE_READ` (como el juego con la DLL) da «Cierra Darksiders II…» sin
+> un handle con `FILE_SHARE_READ` (como lo abre el juego) da «Cierra Darksiders II…» sin
 > crear nada; se rechaza `*.original.obsp`; 7 guardados dejan 5 copias rotativas; y el ciclo
 > guardar → reabrir → restaurar sobre una copia real devuelve `B46DD3DA…`. Protocolo y ediciones
 > candidatas en `research/PRUEBAS_EN_JUEGO.md`, ensayados sobre una copia: `JumpImpulse` del
@@ -135,8 +173,8 @@ Objetivos secundarios, después del primer hito:
 - Copias extraídas, idénticas al instalado (MD5 `063C0AE1D9696F2E13098569D441F460`):
   `C:\Users\vicen\Documents\Extractions\Darksiders\scripts.obsp`, `misc\scripts.obsp` y
   `misc\scripts_1.obsp`.
-- Darksiders2DLL (`...\Software\Darksiders2DLL`): proxy `dinput8.dll` en C++. Ya redirige
-  `mods/<mod>/media/scripts.obsp` en el modo `scripts=inventory`.
+- Darksiders2DLL (`...\Software\Darksiders2DLL`): proxy `dinput8.dll` en C++. No lee ni redirige
+  `scripts.obsp` (el modo `scripts=inventory` se retiró el 2026-10-04).
 - Darkstractor (`...\Software\Darkstractor`): extractor en Python (solo biblioteca estándar)
   con tkinter. Trata `scripts.obsp` como copia exacta, sin interpretarlo.
 
@@ -251,12 +289,10 @@ El rendimiento medido basta si se decodifica bajo demanda. Si se prefiere otro s
 
 ### 4.3 Casos especiales
 
-- **Juego abierto.** El juego lee el archivo, y Darksiders2DLL lo fija con `FILE_SHARE_READ`
-  mientras corre, así que la escritura fallará. Mensaje: "Cierra Darksiders II y vuelve a intentarlo".
+- **Juego abierto.** El juego abre el archivo con `FILE_SHARE_READ`; mientras lo tenga abierto, la
+  escritura fallará. Mensaje: "Cierra Darksiders II y vuelve a intentarlo".
 - **Steam.** "Verificar integridad" o una actualización restauran el original. Al abrir, la
   herramienta muestra el estado del archivo: original de Steam, modificado o desconocido.
-- **Darksiders2DLL con `scripts=inventory`.** Ese modo exige el `scripts.obsp` instalado original,
-  comprobado por SHA. Con el instalado modificado se rechazará: hay que restaurar el original antes de usarlo.
 - **Restaurar original.** Copia `X.original.obsp` encima de `X.obsp`, con verificación. La copia se conserva.
 
 ## 5. Arquitectura
@@ -491,9 +527,8 @@ edición, y la copia del original es idéntica al archivo previo.
 | El juego valida algo que no vemos | No hay checksum aparente en la cabecera; pasos 1 y 2 del protocolo de la fase 4 |
 | Otro archivo depende de offsets del `.obsp` (improbable) | Paso 2 del protocolo (cambio de tamaño) |
 | Corromper el archivo instalado | Copia del original, escritura atómica, verificación posterior y Restaurar original |
-| Juego abierto o DLL que fija el archivo | Detectar el error y pedir que se cierre el juego |
+| Juego abierto con el archivo en uso | Detectar el error y pedir que se cierre el juego |
 | Steam restaura el archivo | Mostrar el estado al abrir; reaplicar con el archivo de parche (fase 8) |
-| `scripts=inventory` de la DLL rechaza el archivo instalado modificado | Documentarlo; restaurar el original antes de usar ese modo |
 | Redondeo de floats | Conservar los bytes crudos y reempaquetar solo los valores editados |
 | Objetos grandes en tkinter (hasta 350 KB, `base/itemfoleytable`) | Hijos perezosos en el árbol y búsqueda en un hilo aparte |
 | Contenido del juego en el repositorio | `.gitignore` con `*.obsp` y fixtures sintéticos |
@@ -537,8 +572,8 @@ Confirmadas por el usuario el 3 de octubre de 2026:
 > verificada, nunca sobrescrita). Exportar a JSON es secundario. El formato
 > está en el apéndice A de `PLAN_MAESTRO.md`: el contenedor y los 4 172 objetos
 > BOD se reconstruyen byte a byte; la función de hash de 64 bits sigue sin
-> identificarse. Proyectos relacionados: Darksiders2DLL (C++, redirige
-> `scripts.obsp` en `scripts=inventory`) y Darkstractor (Python, mismo estilo).
+> identificarse. Proyectos relacionados: Darksiders2DLL (C++, proxy `dinput8.dll`;
+> no toca `scripts.obsp`) y Darkstractor (Python, mismo estilo).
 > Consulta la sección 7 para saber en qué fase está el proyecto.
 
 ## 14. Créditos y procedencia
@@ -681,11 +716,9 @@ u32 grupo      (= el del índice)
 
 - El juego lee `media\scripts.obsp` directamente. Sobrescribirlo, con su copia del original, no
   necesita la DLL.
-- La DLL 0.7.0 solo redirige `mods/<mod>/media/scripts.obsp` si:
-  - el instalado es el original (SHA `B46DD3DA…`);
-  - el mod cambia únicamente los siete enteros `NumSlots` de `death/death`.
-
-  Cualquier otra edición se rechaza.
+- La DLL no lee, fija ni redirige `scripts.obsp`. El mod de inventario de la 0.7.0
+  (`scripts=inventory`, que exigía el instalado original y solo admitía los siete `NumSlots` de
+  `death/death`) se retiró el 2026-10-04. Una línea `scripts=` en su INI ahora desactiva el cargador.
 - Integración posible a futuro, fuera de este plan: una acción "Guardar como mod" en
   D2ScriptViewer más un modo general en la DLL que valide la estructura OBSP. La DLL podría
   reutilizar las comprobaciones de la sección 4.2. Así no habría que tocar el archivo instalado

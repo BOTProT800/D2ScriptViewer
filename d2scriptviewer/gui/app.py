@@ -773,7 +773,6 @@ class ViewerApp(tk.Tk):
                 f"Vas a sobrescribir {target.name} en la instalación del juego.\n\n"
                 f"• {copy_note}\n"
                 "• Darksiders II debe estar cerrado.\n"
-                "• Darksiders2DLL con scripts=inventory exige el archivo original: restáuralo antes de usar ese modo.\n"
                 "• «Verificar integridad» de Steam devolverá el original.\n\n¿Guardar?",
                 icon="warning",
             ):
