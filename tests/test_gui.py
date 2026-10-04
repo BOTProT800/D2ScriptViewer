@@ -16,7 +16,7 @@ import unittest
 from d2scriptviewer.document import Document
 from d2scriptviewer.formats import bod
 from tests import fixtures
-from tests.support import REAL_OBSP, requires_real_file
+from tests.support import REAL_OBSP, TempDirMixin, requires_real_file
 
 
 def _tk_available() -> bool:
@@ -129,27 +129,50 @@ class ViewerSmokeTests(unittest.TestCase):
 
 
 @requires_tk
-class EditingGuiTests(unittest.TestCase):
+class EditingGuiTests(TempDirMixin, unittest.TestCase):
     def setUp(self) -> None:
         from d2scriptviewer.gui.app import ViewerApp
 
         self.app = ViewerApp(auto_open=False, persist_settings=False)
         self.app.withdraw()
-        self.addCleanup(self.app.destroy)
+        self.addCleanup(self._destroy)
         self.questions: list[str] = []
+        self.notes: list[str] = []
         self.answer = True
+        self.save_answer: bool | None = None
 
         def ask(_title: str, message: str, **_options: object) -> bool:
             self.questions.append(message)
             return self.answer
 
+        def ask_save(_title: str, message: str, **_options: object) -> bool | None:
+            self.questions.append(message)
+            return self.save_answer
+
         self.app.ask = ask
-        self.document = Document.from_bytes(fixtures.make_obsp())
+        self.app.ask_save = ask_save
+        self.app.inform = lambda _title, message: self.notes.append(message)
+        self.folder = self.make_temp_dir()
+        self.file = self.folder / "scripts.obsp"
+        self.file.write_bytes(fixtures.make_obsp())
+        self.document = Document.open(self.file)
         self.app.set_document(self.document)
         self.assertTrue(pump(self.app, lambda: self.app.indexes is not None))
         self.desc = self.document.find("death/death_desc")[0].position
         self.app.navigate(self.desc)
         self.view = self.app.property_view
+
+    def _destroy(self) -> None:
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass  # el test ya cerró la ventana
+
+    def closed(self) -> bool:
+        try:
+            return not self.app.winfo_exists()
+        except tk.TclError:
+            return True
 
     def row(self, label: str) -> str:
         tree = self.document.bod(self.desc)
@@ -262,10 +285,67 @@ class EditingGuiTests(unittest.TestCase):
 
     def test_closing_with_changes_asks(self) -> None:
         self.type_into_editor("Health", "5")
-        self.answer = False
+        self.save_answer = None  # Cancelar
         self.app._on_close()
-        self.assertTrue(self.app.winfo_exists())
+        self.assertFalse(self.closed())
         self.assertIn("1 cambio sin guardar", self.questions[-1])
+
+    def test_closing_and_discarding(self) -> None:
+        self.type_into_editor("Health", "5")
+        self.save_answer = False
+        self.app._on_close()
+        self.assertTrue(self.closed())
+        self.assertEqual(self.file.read_bytes(), fixtures.make_obsp())
+
+    def test_closing_and_saving_first(self) -> None:
+        self.type_into_editor("Health", "5")
+        self.save_answer = True
+        self.app._on_close()
+        self.assertTrue(pump(self.app, self.closed))
+        self.assertNotEqual(self.file.read_bytes(), fixtures.make_obsp())
+        self.assertEqual((self.folder / "scripts.original.obsp").read_bytes(), fixtures.make_obsp())
+
+    def wait_saved(self) -> None:
+        self.assertTrue(pump(self.app, lambda: not self.app.saving))
+
+    def test_save_creates_the_copy_and_clears_marks(self) -> None:
+        self.app.save()
+        self.assertEqual(self.app.status_var.get(), "No hay cambios que guardar")
+        self.type_into_editor("Health", "250")
+        self.app.save()
+        self.assertTrue(self.app.saving)
+        self.wait_saved()
+        copy = self.folder / "scripts.original.obsp"
+        self.assertEqual(copy.read_bytes(), fixtures.make_obsp())
+        self.assertEqual(len(self.notes), 1)
+        self.assertIn("Copia del original creada", self.notes[0])
+        self.assertEqual(self.app.changes_var.get(), "Sin cambios")
+        self.assertFalse(self.app.title().startswith("*"))
+        self.assertFalse(self.app.object_tree.tree.item(f"o{self.desc}", "text").startswith("● "))
+        self.assertNotIn("edited", self.view.tree.item(self.row("Health"), "tags"))
+        self.assertIn("Modificado", self.app.state_var.get())
+        reopened = Document.open(self.file)
+        tree = reopened.bod(self.desc)
+        health = next(path for path, _node in bod.walk(tree.root) if bod.path_label(tree, path) == "Health")
+        self.assertEqual(bod.resolve(tree, health).value, 250)
+        # Un segundo guardado no avisa de nuevo ni toca la copia.
+        self.type_into_editor("Health", "251")
+        self.app.save()
+        self.wait_saved()
+        self.assertEqual(len(self.notes), 1)
+        self.assertEqual(copy.read_bytes(), fixtures.make_obsp())
+
+    def test_restore_original_reopens_the_file(self) -> None:
+        self.app.restore_original_file()
+        self.assertIn("No existe scripts.original.obsp", self.notes[-1])
+        self.type_into_editor("Speed", "7")
+        self.app.save()
+        self.wait_saved()
+        self.app.restore_original_file()
+        self.assertTrue(pump(self.app, lambda: self.app.document is not self.document and not self.app.saving))
+        self.assertEqual(self.file.read_bytes(), fixtures.make_obsp())
+        self.assertEqual(self.app.document.obsp.data, fixtures.make_obsp())
+        self.assertIn("vuelve a ser la copia del original", self.notes[-1])
 
 
 @requires_tk

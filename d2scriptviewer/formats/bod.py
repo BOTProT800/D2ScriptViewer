@@ -19,6 +19,7 @@ sin editar nunca cambia por redondeo ni por normalización.
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 import struct
 from typing import Iterator, NamedTuple, Union
 
@@ -592,15 +593,23 @@ def path_label(document: BodDocument, path: Path) -> str:
 
 
 def format_float(value: float) -> str:
-    """El texto más corto que, empaquetado como float32, da el mismo valor."""
+    """El texto más corto que, empaquetado como float32, da el mismo valor.
+
+    Se escribe en notación decimal (``200``, no ``2e+02``) salvo en magnitudes
+    extremas, donde la científica es más legible.
+    """
     if math.isnan(value) or math.isinf(value):
         return repr(value)
     packed = F32.pack(value)
     for precision in range(1, 10):
         text = f"{value:.{precision}g}"
         if F32.pack(float(text)) == packed:
-            return text
-    return repr(value)
+            break
+    else:
+        text = repr(value)
+    if "e" in text and -7 < int(text.rsplit("e", 1)[1]) < 16:
+        text = format(Decimal(text), "f")
+    return text
 
 
 def value_text(value: object) -> str:

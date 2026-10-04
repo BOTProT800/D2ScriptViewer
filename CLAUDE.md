@@ -19,8 +19,10 @@ Cuando se cierre una fase o cambie una decisión, actualízalo con una nota fech
 principio, como hace el plan de Darksiders2DLL.
 
 Estado al 4 de octubre de 2026: fases 0 (base del repositorio), 1 (núcleo de formato y CLI),
-2 (visor de solo lectura, con visto bueno del usuario) y 3 (edición de valores) cerradas. En
-curso la fase 4 (guardado y copia del original), que cierra el primer hito. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+2 (visor de solo lectura, con visto bueno del usuario) y 3 (edición de valores) cerradas. La
+fase 4 (guardado y copia del original) está implementada y espera la prueba en el juego que
+hace el usuario (protocolo en `research/PRUEBAS_EN_JUEGO.md`). Con su resultado se cierra el
+primer hito. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -59,6 +61,10 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   (`ValueEdit`, `EditGroup`). Una edición cambia el *estado* de una hoja, nunca su tipo.
   `Document.edit()` / `undo()` / `redo()` / `revert_*()` llevan el registro; un objeto está
   modificado mientras alguna propiedad difiera de su original.
+- `saving.py`: `prepare_save` (en el hilo de Tk) y `execute_save` (en un hilo): autoverificar,
+  comprobar que se puede escribir, copia del original, copia rotativa, `.tmp` + `fsync` +
+  `os.replace` y relectura con SHA. `restore_original`, `file_status`, `cleanup_orphan_tmp`.
+  `fail_at` permite a los tests simular fallos en cada paso.
 - `references.py` (índice `FC` y diccionario en una pasada) y `search.py` (búsqueda en hilo).
 - `wording.py`: plurales («1 objeto», «2 objetos»).
 - `verification.py`: las comprobaciones completas que usa `verify`.

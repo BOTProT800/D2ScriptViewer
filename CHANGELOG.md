@@ -35,3 +35,18 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   propiedad o un objeto; ventana «Cambios pendientes» (Ctrl+P) con antes → después; marcas de
   modificado en el árbol, las propiedades, el título y la barra de estado; aviso y
   confirmación al editar campos con aspecto de identificador o de hash.
+- Guardar en `.obsp` (Ctrl+S) y Guardar como: el archivo se construye en memoria, se
+  autoverifica, se escribe en un `.tmp` con `fsync`, se sustituye con `os.replace` y se relee
+  para comparar su SHA-256. El primer guardado encima de `X.obsp` crea `X.original.obsp`,
+  verificado y de solo lectura, que nunca se sobrescribe; guardar encima de un
+  `*.original.obsp` se rechaza.
+- Copias rotativas de la versión anterior en `.d2sv_backups\` (las últimas 5), activadas por
+  defecto y desactivables desde el menú Archivo.
+- Restaurar original, estado del archivo en la barra (original de Steam, modificado o
+  desconocido), mensajes claros con el juego abierto, archivos de solo lectura o sin permisos,
+  limpieza de un `.tmp` huérfano al abrir y pregunta de guardar al salir o al abrir otro archivo.
+- `research/PRUEBAS_EN_JUEGO.md` con el protocolo de la prueba en el juego.
+
+### Changed
+
+- Los floats se muestran en notación decimal (`200`, no `2e+02`) salvo en magnitudes extremas.

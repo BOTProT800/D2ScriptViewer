@@ -1,5 +1,29 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> Fase 4 implementada (2026-10-04), pendiente de la prueba en el juego (punto de control 2):
+> `saving.py` sigue la sección 4. Construye en `prepare_save` y autoverifica en `verify_plan`
+> (mismos objetos e identidades, blobs sin editar idénticos y editados iguales al árbol).
+> Comprueba que el destino se puede escribir con `CreateFileW` vía `ctypes`, que distingue
+> «en uso» (32/33) de «sin permiso» (5) porque `open()` los confunde. Crea la copia del original
+> una sola vez (`X.original.obsp`, SHA verificado, solo lectura, etiquetada como original de
+> Steam o como previa modificada), hace la copia rotativa en `.d2sv_backups\X.<AAAAMMDD-hhmmss-µs>.obsp`
+> (las últimas 5) y escribe en `X.obsp.tmp` con `fsync` + `os.replace`. Después relee y compara
+> el SHA; si no coincide ofrece restaurar. También restaura el original, informa del estado del
+> archivo y limpia un `.tmp` huérfano al abrir. En la GUI: Guardar (Ctrl+S), Guardar como
+> (Ctrl+Mayús+S), Restaurar original, conmutador de copias rotativas, confirmación al guardar
+> dentro de la instalación del juego y Guardar/No/Cancelar al salir o abrir otro archivo. Tras
+> guardar, `Document.mark_saved` toma el archivo escrito como nueva base sin perder el
+> historial de deshacer. Tests (126 en total): la copia se crea una sola vez y nunca se toca;
+> un fallo simulado en cada paso previo a la sustitución deja el destino intacto y sin `.tmp`;
+> un handle con `FILE_SHARE_READ` (como el juego con la DLL) da «Cierra Darksiders II…» sin
+> crear nada; se rechaza `*.original.obsp`; 7 guardados dejan 5 copias rotativas; y el ciclo
+> guardar → reabrir → restaurar sobre una copia real devuelve `B46DD3DA…`. Protocolo y ediciones
+> candidatas en `research/PRUEBAS_EN_JUEGO.md`, ensayados sobre una copia: `JumpImpulse` del
+> estado «Jump» 350 → 700 (mismo tamaño) y un `FlagID` de `base/quest_test_dialog` alargado
+> 5 bytes (desplaza los offsets de 7 813 objetos). **Desviaciones:** la copia rotativa lleva
+> microsegundos en el nombre para que dos guardados en el mismo segundo no choquen; `wording.py`
+> corrige los plurales y los floats se muestran en notación decimal.
+>
 > Fase 3 cerrada (2026-10-04): edición de valores. Núcleo en `edits.py` (validación y comandos)
 > y `document.py` (seguimiento de cambios, deshacer/rehacer, revertir propiedad u objeto,
 > cambios pendientes y `current_data()`, el archivo tal como se guardaría). Editores: `02`

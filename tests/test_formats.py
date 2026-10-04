@@ -208,6 +208,12 @@ class BodPresentationTests(unittest.TestCase):
     def test_value_texts(self) -> None:
         self.assertEqual(bod.value_text(bod.Float32.of(0.1)), "0.1")
         self.assertEqual(bod.value_text(bod.Float32.of(1.0)), "1")
+        # Notación decimal salvo en magnitudes extremas.
+        self.assertEqual(bod.value_text(bod.Float32.of(200.0)), "200")
+        self.assertEqual(bod.value_text(bod.Float32.of(148360.0)), "148360")
+        self.assertEqual(bod.value_text(bod.Float32.of(3.4e38)), "3.4e+38")
+        self.assertEqual(bod.value_text(bod.Float32.of(-0.0)), "-0")
+        self.assertEqual(bod.value_text(bod.BodTuple([bod.Null()])), "1 elemento")
         self.assertEqual(bod.value_text(bod.Bool(2)), "true (0x02)")
         self.assertEqual(bod.value_text(bod.ExternalRef(10000, 255)), "→ 10000:00000000000000FF")
         self.assertEqual(bod.type_text(bod.BodList(bod.MODE_PAIRS, [])), "pares")

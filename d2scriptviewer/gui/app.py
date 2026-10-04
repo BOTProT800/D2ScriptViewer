@@ -22,14 +22,14 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
-from .. import __version__, edits
+from .. import __version__, edits, saving
 from ..document import Document
 from ..edits import EditGroup
 from ..errors import D2ScriptViewerError, EditError
 from ..formats import bod
 from ..formats.obsp import identity_text
 from ..references import Cancelled, FileIndexes, build_indexes, references_in
-from ..settings import find_default_obsp, load_settings, save_settings
+from ..settings import DEFAULT_GAME, find_default_obsp, load_settings, save_settings
 from ..wording import count as count_text
 from . import theme
 from .details import DetailsPanel
@@ -63,13 +63,21 @@ class ViewerApp(tk.Tk):
         self.history_back: list[int] = []
         self.history_forward: list[int] = []
         self.index_cancel = threading.Event()
-        self.tokens = {"open": 0, "index": 0, "decode": 0}
+        self.tokens = {"open": 0, "index": 0, "decode": 0, "save": 0, "restore": 0}
         self.search_window: SearchWindow | None = None
         self.pending_window: PendingChangesWindow | None = None
-        #: Confirmaciones sí/no; los tests lo sustituyen para no abrir diálogos.
+        #: Confirmaciones sí/no y sí/no/cancelar; los tests las sustituyen para no abrir diálogos.
         self.ask: Callable[..., bool] = lambda title, message, **options: messagebox.askyesno(
             title, message, parent=self, **options
         )
+        self.ask_save: Callable[..., "bool | None"] = lambda title, message, **options: messagebox.askyesnocancel(
+            title, message, parent=self, **options
+        )
+        #: Avisos informativos (resumen del primer guardado); también sustituibles.
+        self.inform: Callable[[str, str], None] = lambda title, message: messagebox.showinfo(title, message, parent=self)
+        self.saving = False
+        self._after_save: Callable[[], None] | None = None
+        self._game_save_confirmed: set[Path] = set()
         #: Segundos que tardó en mostrarse el último objeto (para medir el criterio < 1 s).
         self.last_display_seconds = 0.0
         self._display_started = 0.0
@@ -79,6 +87,7 @@ class ViewerApp(tk.Tk):
         self.status_var = tk.StringVar(value="Abre un scripts.obsp con Archivo → Abrir (Ctrl+O)")
         self.path_var = tk.StringVar(value="")
         self.changes_var = tk.StringVar(value="")
+        self.rotating_var = tk.BooleanVar(value=bool(self.settings.get("rotating_backups", True)))
 
         self._build_menu()
         self._build_ui()
@@ -96,6 +105,14 @@ class ViewerApp(tk.Tk):
         menubar = tk.Menu(self)
         self.file_menu = tk.Menu(menubar, tearoff=False)
         self.file_menu.add_command(label="Abrir…", accelerator="Ctrl+O", command=self.choose_file)
+        self.file_menu.add_command(label="Guardar", accelerator="Ctrl+S", command=self.save)
+        self.file_menu.add_command(label="Guardar como…", accelerator="Ctrl+Mayús+S", command=self.save_as)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Restaurar original…", command=self.restore_original_file)
+        self.file_menu.add_checkbutton(
+            label=f"Copia rotativa de la versión anterior (últimas {saving.KEEP_BACKUPS})",
+            variable=self.rotating_var,
+        )
         self.file_menu.add_separator()
         self.file_menu.add_command(label="Salir", command=self._on_close)
         menubar.add_cascade(label="Archivo", menu=self.file_menu)
@@ -126,6 +143,8 @@ class ViewerApp(tk.Tk):
         self.menubar = menubar
 
         self.bind_all("<Control-o>", lambda _event: self.choose_file())
+        self.bind_all("<Control-s>", lambda _event: self.save() or "break")
+        self.bind_all("<Control-S>", lambda _event: self.save_as() or "break")
         self.bind_all("<Control-f>", lambda _event: self.open_search())
         self.bind_all("<Alt-Left>", lambda _event: self.go_back())
         self.bind_all("<Alt-Right>", lambda _event: self.go_forward())
@@ -247,21 +266,38 @@ class ViewerApp(tk.Tk):
             return Path(value)
         return None
 
-    def _confirm_discard(self, action: str) -> bool:
-        """Pide permiso para perder los cambios sin guardar; ``True`` si no hay o se aceptan."""
-        if self.document is None or not self.document.change_count:
+    def _resolve_unsaved(self, action: str, then: Callable[[], None]) -> bool:
+        """Pregunta qué hacer con los cambios sin guardar antes de ``action``.
+
+        Devuelve ``True`` si se puede seguir ya (no hay cambios o se descartan). Si el
+        usuario elige guardar, el guardado corre en segundo plano y ``then`` se llama
+        al terminar bien; entonces devuelve ``False``, igual que al cancelar.
+        """
+        document = self.document
+        if self.saving:
+            self.status_var.set("Espera a que termine el guardado")
+            return False
+        if document is None or not document.change_count:
             return True
-        count = self.document.change_count
-        return bool(
-            self.ask(
-                APP_NAME,
-                f"Hay {count_text(count, 'cambio')} sin guardar. Si {action}, se perderán.\n\n¿Continuar de todos modos?",
-                icon="warning",
-            )
+        answer = self.ask_save(
+            APP_NAME,
+            f"Hay {count_text(document.change_count, 'cambio')} sin guardar.\n\n"
+            f"¿Guardarlos antes de {action}?\n(«No» los descarta.)",
+            icon="warning",
         )
+        if answer is None:
+            return False
+        if not answer:
+            return True
+        target = document.path
+        if target is None or saving.is_original_copy(target):
+            self.inform(APP_NAME, "Este archivo es la copia del original: guarda los cambios con «Guardar como».")
+            return False
+        self._start_save(target, then=then)
+        return False
 
     def choose_file(self) -> None:
-        if not self._confirm_discard("abres otro archivo"):
+        if not self._resolve_unsaved("abrir otro archivo", then=self.choose_file):
             return
         current = self.document.path if self.document and self.document.path else None
         selected = filedialog.askopenfilename(
@@ -277,7 +313,12 @@ class ViewerApp(tk.Tk):
         self.status_var.set(f"Abriendo {path.name}…")
         self.progress.configure(mode="indeterminate")
         self.progress.start(15)
-        self._spawn("open", lambda: Document.open(path))
+
+        def work() -> tuple[Document, bool]:
+            removed = saving.cleanup_orphan_tmp(path)
+            return Document.open(path), removed
+
+        self._spawn("open", work)
 
     def _on_open(self, token: int, payload: object) -> None:
         if token != self.tokens["open"]:
@@ -289,8 +330,10 @@ class ViewerApp(tk.Tk):
             message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
             messagebox.showerror(APP_NAME, f"No se pudo abrir el archivo.\n\n{message}", parent=self)
             return
-        assert isinstance(payload, Document)
-        self.set_document(payload)
+        document, removed_tmp = payload  # type: ignore[misc]
+        self.set_document(document)
+        if removed_tmp:
+            self.status_var.set(f"Se borró {saving.tmp_path(document.path).name}, resto de un guardado interrumpido")
 
     def set_document(self, document: Document) -> None:
         self.index_cancel.set()
@@ -326,12 +369,9 @@ class ViewerApp(tk.Tk):
         if self.document is None:
             self.state_var.set("")
             return
-        if self.document.is_steam_original:
-            self.state_var.set("● Original de Steam")
-            self.state_label.configure(style="StatusOk.TLabel")
-        else:
-            self.state_var.set("● No es el original de Steam")
-            self.state_label.configure(style="StatusWarn.TLabel")
+        status = saving.file_status(self.document.path, self.document.obsp.sha256())
+        self.state_var.set(f"● {status.text}")
+        self.state_label.configure(style="StatusOk.TLabel" if status.kind == "steam" else "StatusWarn.TLabel")
 
     # --- Índice de referencias -----------------------------------------------------------
 
@@ -520,6 +560,8 @@ class ViewerApp(tk.Tk):
         document, position = self.document, self.position
         if document is None or position is None:
             return "No hay ningún objeto seleccionado"
+        if self.saving:
+            return "Espera a que termine el guardado"
         try:
             state = edits.parse_state(node, text, self.indexes.dictionary if self.indexes else None)
         except EditError as error:
@@ -545,7 +587,7 @@ class ViewerApp(tk.Tk):
 
     def pick_reference(self, node: object, path: tuple) -> None:
         document, position = self.document, self.position
-        if document is None or position is None or not isinstance(node, bod.ExternalRef):
+        if document is None or position is None or not isinstance(node, bod.ExternalRef) or self.saving:
             return
         title = f"{document.objects[position].label()} · {document.property_label(position, path)}"
         identity = ReferencePicker(self, document, node.identity, title).choose()
@@ -560,7 +602,7 @@ class ViewerApp(tk.Tk):
             self._after_change(group, reveal=False)
 
     def revert_property(self, path: tuple) -> None:
-        if self.document is None or self.position is None:
+        if self.document is None or self.position is None or self.saving:
             return
         group = self.document.revert_property(self.position, path)
         if group is not None:
@@ -571,7 +613,7 @@ class ViewerApp(tk.Tk):
             self.revert_object(self.position)
 
     def revert_object(self, position: int) -> None:
-        if self.document is None:
+        if self.document is None or self.saving:
             return
         group = self.document.revert_object(position)
         if group is None:
@@ -580,7 +622,7 @@ class ViewerApp(tk.Tk):
         self._after_change(group, reveal=position != self.position)
 
     def undo(self) -> None:
-        if self.document is None:
+        if self.document is None or self.saving:
             return
         self.property_view.cancel_edit()
         group = self.document.undo()
@@ -588,7 +630,7 @@ class ViewerApp(tk.Tk):
             self._after_change(group, reveal=True, prefix="Deshecho")
 
     def redo(self) -> None:
-        if self.document is None:
+        if self.document is None or self.saving:
             return
         self.property_view.cancel_edit()
         group = self.document.redo()
@@ -662,6 +704,175 @@ class ViewerApp(tk.Tk):
             on_revert_object=self.revert_object,
         )
 
+    # --- Guardar -------------------------------------------------------------------------
+
+    def _commit_pending_editor(self) -> bool:
+        """Confirma un editor abierto antes de guardar; ``False`` si su texto no es válido."""
+        if self.property_view.editing and self.property_view.editor is not None:
+            self.property_view.editor.commit()
+        return not self.property_view.editing
+
+    def save(self) -> None:
+        document = self.document
+        if document is None or self.saving or not self._commit_pending_editor():
+            return
+        target = document.path
+        if target is None or saving.is_original_copy(target):
+            if target is not None:
+                self.inform(APP_NAME, f"{target.name} es la copia del original y nunca se sobrescribe.\n\n"
+                                      "Usa «Guardar como» para guardar los cambios en otro archivo.")
+            self.save_as()
+            return
+        if not document.change_count:
+            self.status_var.set("No hay cambios que guardar")
+            return
+        self._start_save(target)
+
+    def save_as(self) -> None:
+        document = self.document
+        if document is None or self.saving or not self._commit_pending_editor():
+            return
+        current = document.path
+        selected = filedialog.asksaveasfilename(
+            parent=self,
+            title="Guardar como",
+            defaultextension=".obsp",
+            initialdir=str(current.parent) if current else None,
+            initialfile=current.name if current and not saving.is_original_copy(current) else "scripts.obsp",
+            filetypes=[("Scripts de Darksiders II", "*.obsp"), ("Todos los archivos", "*.*")],
+        )
+        if not selected:
+            return
+        target = Path(selected)
+        if saving.is_original_copy(target):
+            messagebox.showerror(APP_NAME, "Los archivos *.original.obsp son copias del original y nunca se "
+                                           "sobrescriben. Elige otro nombre.", parent=self)
+            return
+        self._start_save(target)
+
+    @staticmethod
+    def _in_game_folder(path: Path) -> bool:
+        try:
+            return path.resolve().is_relative_to(DEFAULT_GAME.resolve())
+        except OSError:
+            return False
+
+    def _start_save(self, target: Path, then: Callable[[], None] | None = None) -> None:
+        document = self.document
+        if document is None or self.saving:
+            return
+        if self._in_game_folder(target) and target not in self._game_save_confirmed:
+            copy = saving.original_copy_path(target)
+            copy_note = (
+                f"{copy.name} ya existe y no se tocará."
+                if copy.exists()
+                else f"Antes se creará {copy.name}: copia exacta del archivo actual, verificada y de solo lectura."
+            )
+            if not self.ask(
+                APP_NAME,
+                f"Vas a sobrescribir {target.name} en la instalación del juego.\n\n"
+                f"• {copy_note}\n"
+                "• Darksiders II debe estar cerrado.\n"
+                "• Darksiders2DLL con scripts=inventory exige el archivo original: restáuralo antes de usar ese modo.\n"
+                "• «Verificar integridad» de Steam devolverá el original.\n\n¿Guardar?",
+                icon="warning",
+            ):
+                return
+            self._game_save_confirmed.add(target)
+        try:
+            plan = saving.prepare_save(document)
+        except D2ScriptViewerError as error:
+            messagebox.showerror(APP_NAME, str(error), parent=self)
+            return
+        self.saving = True
+        self._after_save = then
+        self.status_var.set(f"Guardando {target.name}…")
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(15)
+        rotating = self.rotating_var.get()
+        self._spawn("save", lambda: (target, plan, saving.execute_save(plan, target, rotating_backups=rotating)))
+
+    def _on_save(self, token: int, payload: object) -> None:
+        if token != self.tokens["save"]:
+            return
+        self.saving = False
+        self.progress.stop()
+        self.progress.configure(mode="determinate", value=0)
+        then, self._after_save = self._after_save, None
+        document = self.document
+        if isinstance(payload, BaseException):
+            self.status_var.set("No se guardó")
+            message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
+            if isinstance(payload, saving.WrittenMismatchError) and document is not None and document.path:
+                if self.ask(APP_NAME, f"{message}\n\n¿Restaurar ahora la copia del original?", icon="error"):
+                    self.restore_original_file(confirm=False)
+                return
+            messagebox.showerror(APP_NAME, f"No se guardó el archivo.\n\n{message}", parent=self)
+            return
+        target, plan, result = payload  # type: ignore[misc]
+        assert document is not None
+        document.mark_saved(plan.data, target)
+        self.path_var.set(str(target))
+        self.settings["last_file"] = str(target)
+        self.object_tree.set_modified(set())
+        if self.position is not None and document.cached_bod(self.position) is not None:
+            self.property_view.set_edited(set())
+        if self.position is not None:
+            self._show_details(self.position)
+        if self.pending_window is not None and self.pending_window.winfo_exists():
+            self.pending_window.refresh()
+        self._update_file_state()
+        self._update_change_state()
+        self.status_var.set(result.summary().splitlines()[0])
+        if result.original_created or result.warnings:
+            self.inform(APP_NAME, result.summary())
+        if then is not None:
+            then()
+
+    def restore_original_file(self, confirm: bool = True) -> None:
+        document = self.document
+        if document is None or document.path is None or self.saving:
+            return
+        path = document.path
+        if saving.is_original_copy(path):
+            self.inform(APP_NAME, "Este archivo ya es la copia del original.")
+            return
+        copy = saving.original_copy_path(path)
+        if not copy.is_file():
+            self.inform(APP_NAME, f"No existe {copy.name} junto a {path.name}.\n\n"
+                                  "La copia se crea la primera vez que se guarda encima del archivo.")
+            return
+        if confirm:
+            lost = (f"\n• Se perderán {count_text(document.change_count, 'cambio')} sin guardar."
+                    if document.change_count else "")
+            if not self.ask(
+                APP_NAME,
+                f"Se copiará {copy.name} encima de {path.name} y se verificará.\n"
+                f"• {copy.name} se conserva.\n"
+                f"• La versión actual irá a {saving.BACKUP_DIR} si las copias rotativas están activas.{lost}\n\n"
+                "¿Restaurar?",
+                icon="warning",
+            ):
+                return
+        self.saving = True
+        self.status_var.set(f"Restaurando {path.name}…")
+        rotating = self.rotating_var.get()
+        self._spawn("restore", lambda: saving.restore_original(path, rotating_backups=rotating))
+
+    def _on_restore(self, token: int, payload: object) -> None:
+        if token != self.tokens["restore"]:
+            return
+        self.saving = False
+        if isinstance(payload, BaseException):
+            self.status_var.set("No se restauró")
+            message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
+            messagebox.showerror(APP_NAME, f"No se restauró el original.\n\n{message}", parent=self)
+            return
+        assert isinstance(payload, saving.RestoreResult)
+        origin = "el original de Steam" if payload.is_steam else "la copia del original"
+        self.inform(APP_NAME, f"{payload.path.name} vuelve a ser {origin}.\nSHA-256 {payload.sha256}")
+        self.open_file(payload.path)
+
     # --- Búsqueda ------------------------------------------------------------------------
 
     def open_search(self) -> None:
@@ -684,12 +895,16 @@ class ViewerApp(tk.Tk):
         )
 
     def _on_close(self) -> None:
-        if not self._confirm_discard("sales"):
+        if not self._resolve_unsaved("salir", then=self._close_now):
             return
+        self._close_now()
+
+    def _close_now(self) -> None:
         self.index_cancel.set()
         if self.persist_settings:
             self.settings["geometry"] = self.geometry()
             self.settings["group_by"] = self.object_tree.group_var.get()
+            self.settings["rotating_backups"] = bool(self.rotating_var.get())
             save_settings(self.settings)
         self.destroy()
 

@@ -50,6 +50,30 @@ un entero, redondeo de un float).
 
 Los objetos de script compilado son de solo lectura.
 
+### Guardar
+
+- **Guardar** (Ctrl+S) reescribe el archivo en el mismo formato `.obsp`. La primera vez que se
+  guarda encima de `scripts.obsp` se crea antes `scripts.original.obsp` en la misma carpeta:
+  una copia exacta del archivo tal como estaba, verificada por SHA-256 y de solo lectura. Esa
+  copia **nunca** se sobrescribe ni se borra, y no se puede guardar encima de ella.
+- Cada guardado deja además la versión anterior en `.d2sv_backups\` (las últimas 5); se puede
+  desactivar en el menú Archivo.
+- El archivo se construye en memoria, se vuelve a leer y se compara antes de escribir; se
+  escribe en un `.tmp` y se sustituye de forma atómica; al terminar se relee y se compara su
+  SHA-256. Si algo falla antes de sustituirlo, el archivo queda intacto.
+- **Guardar como…** escribe en otro archivo.
+- **Restaurar original…** copia `scripts.original.obsp` encima de `scripts.obsp` y lo verifica.
+- La barra de estado indica si el archivo es el original de Steam, si está modificado (y hay
+  copia del original) o si es desconocido.
+
+Avisos:
+
+- **Cierra Darksiders II antes de guardar.** Con el juego abierto (o con Darksiders2DLL
+  fijando el archivo) no se puede escribir, y la herramienta lo dice.
+- Darksiders2DLL en modo `scripts=inventory` exige el `scripts.obsp` original: restáuralo antes de
+  usar ese modo.
+- «Verificar integridad de los archivos» de Steam, o una actualización, devuelven el original.
+
 Línea de órdenes:
 
 ```powershell

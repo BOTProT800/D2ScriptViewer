@@ -63,6 +63,19 @@ class Document:
     def __init__(self, obsp: ObspFile, path: Path | None = None) -> None:
         self.obsp = obsp
         self.path = path
+        self._index_objects()
+        self._bod_cache: dict[int, bod.BodDocument] = {}
+        self._script_cache: dict[int, script.ScriptHeader] = {}
+        #: posición → ruta → estado original de cada propiedad que hoy difiere de él.
+        self._originals: dict[int, dict[tuple, State]] = {}
+        self._encoded: dict[int, bytes] = {}
+        self._undo: list[EditGroup] = []
+        self._redo: list[EditGroup] = []
+        #: Crece con cada cambio; sirve para saber si una vista está al día.
+        self.version = 0
+
+    def _index_objects(self) -> None:
+        obsp = self.obsp
         self.objects = [
             ObjectInfo(
                 position,
@@ -75,15 +88,23 @@ class Document:
             for position, entry in enumerate(obsp.entries)
         ]
         self._by_identity = {info.identity: info for info in self.objects}
-        self._bod_cache: dict[int, bod.BodDocument] = {}
-        self._script_cache: dict[int, script.ScriptHeader] = {}
-        #: posición → ruta → estado original de cada propiedad que hoy difiere de él.
-        self._originals: dict[int, dict[tuple, State]] = {}
-        self._encoded: dict[int, bytes] = {}
-        self._undo: list[EditGroup] = []
-        self._redo: list[EditGroup] = []
-        #: Crece con cada cambio; sirve para saber si una vista está al día.
-        self.version = 0
+
+    def mark_saved(self, data: bytes, path: Path) -> None:
+        """El archivo recién escrito pasa a ser la base: ya no hay cambios pendientes.
+
+        Los árboles en caché siguen valiendo (son justo lo que se escribió) y el
+        historial de deshacer se conserva: deshacer después de guardar vuelve a
+        dejar cambios pendientes respecto a lo guardado.
+        """
+        obsp = ObspFile.parse(data)
+        if [entry.identity for entry in obsp.entries] != [entry.identity for entry in self.obsp.entries]:
+            raise EditError("El archivo guardado no tiene los mismos objetos que el documento")
+        self.obsp = obsp
+        self.path = path
+        self._index_objects()
+        self._originals.clear()
+        self._encoded.clear()
+        self.version += 1
 
     @classmethod
     def open(cls, path: Path) -> "Document":
