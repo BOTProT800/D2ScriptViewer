@@ -130,6 +130,30 @@ releer, `verify` y restaurar dieron lo esperado.
   fallaría o el juego se cerraría. **Hipótesis:** que un estado repetido e idéntico (mismo `Name`
   e `ID`) no cambie nada se deduce de que la copia es exacta; también es parte de lo que se prueba.
 
-### Resultado
+### Resultado (2026-10-04)
 
-Pendiente: lo registrará el usuario tras jugar.
+El usuario hizo la prueba con la herramienta sobre el archivo instalado e informó de que
+«funciona»: el juego carga el archivo con la edición estructural y la refleja. No dio más
+detalles y no se registran.
+
+**Evidencia en la instalación**, leída después del informe y solo para leer:
+
+- **15:17:54, guardado.** La copia rotativa `scripts.20261004-151754-697791.obsp` tiene SHA
+  `B46DD3DA…`: es el original de Steam, la versión previa al guardado.
+- **15:19:43, restauración.** La copia rotativa `scripts.20261004-151943-691961.obsp`
+  (18 334 632 bytes, SHA `FE50F6A4E22CE77E…`) es la versión que se jugó. Coincide byte a byte
+  con el ensayo, así que la edición fue exactamente la prevista: duplicar `MoveStates[0]` y
+  `JumpImpulse` 700 en `MoveStates[45]`.
+- **Archivo instalado:** 18 334 463 bytes, SHA `B46DD3DA…`, original de Steam. Restaurar
+  funcionó.
+- **`scripts.original.obsp`:** sin cambios desde su creación (03:42:21, SHA `B46DD3DA…`).
+- **Copias rotativas:** con las dos nuevas había seis, y la poda borró la más antigua (03:42:21)
+  dejando las últimas 5.
+
+### Conclusión
+
+El juego no usa los índices internos de los objetos `07` de un BOD, o al menos tolera que el
+codificador los renumere: con 3 objetos insertados al principio de la lista de estados de
+movimiento de Death, el estado «Jump» (índice 585 → 588) se lee bien y refleja su cambio.
+También tolera un estado repetido idéntico, con el mismo `Name` e `ID`. Insertar, eliminar y
+mover objetos dentro de un BOD es viable.

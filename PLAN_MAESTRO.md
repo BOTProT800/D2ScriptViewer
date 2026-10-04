@@ -1,6 +1,26 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
-> Fase 5 implementada (2026-10-04), pendiente de la prueba en el juego (punto de control):
+> **Fase 5 cerrada (2026-10-04)** con la prueba en el juego (detalle en
+> `research/PRUEBAS_EN_JUEGO.md`). El usuario duplicó `MoveStates[0]` de
+> `death/playercommon_movestates` (+3 objetos `07`; el estado «Jump» pasa del índice interno 585 al
+> 588) y puso `JumpImpulse` 700. Informó de que el juego carga el archivo y refleja el cambio. La
+> versión jugada (SHA `FE50F6A4…`) coincide con el ensayo, y restaurar devolvió `B46DD3DA…`.
+> **Conclusión:** el juego tolera la renumeración de los objetos `07`, así que la edición
+> estructural es viable.
+>
+> Criterios de «Hecho cuando»:
+>
+> 1. Duplicar, eliminar, subir y bajar en listas y mapas; poner a nulo un `07` o `FC`; rellenar
+>    nulos según las decisiones: sí.
+> 2. Todo se deshace y se revierte; editar y deshacer deja el blob idéntico: sí, por tests y fuzz.
+> 3. «Cambios pendientes» muestra la estructura: sí.
+> 4. Validación (bloquear claves repetidas y `FC` sin destino; avisar de `*ID` nuevos): sí.
+> 5. El fuzz sobre los BOD reales es canónico y deshacer da el original: sí.
+> 6. El juego carga la edición estructural: sí.
+>
+> 155 tests. Las fases 6 a 9 quedan a elección del usuario.
+>
+> Fase 5 implementada (2026-10-04), antes de la prueba en el juego (punto de control):
 >
 > - **Operaciones** (`edits.py`): `InsertItem`, `RemoveItem`, `MoveItem`, `ReplaceValue` y
 >   `ReplaceTree`, todas reversibles y con la misma forma que `ValueEdit`. El documento ofrece

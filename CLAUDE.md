@@ -22,9 +22,9 @@ Estado al 4 de octubre de 2026: **primer hito cerrado** (fases 0 a 4): visor, ed
 valores y guardado en `.obsp` con copia del original, validados en el juego. El juego carga un
 archivo guardado por la herramienta, también con otro tamaño y los offsets recalculados, y
 restaurar devuelve el SHA de Steam (`research/PRUEBAS_EN_JUEGO.md`). Fase 5 (edición
-estructural) implementada y pendiente de su prueba en el juego; sus decisiones (tuplas fijas,
-nulos solo en huecos de objeto, qué bloquea y qué avisa al guardar) están al principio del plan.
-Las fases 6 a 9 quedan a elección del usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+estructural) cerrada y validada en el juego: el juego tolera que se renumeren los objetos `07`
+de un BOD. Sus decisiones (tuplas fijas, nulos solo en huecos de objeto, qué bloquea y qué avisa
+al guardar) están al principio del plan. Las fases 6 a 9 quedan a elección del usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
