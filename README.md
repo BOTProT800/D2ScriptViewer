@@ -3,16 +3,38 @@
 Visor y editor de escritorio para `media\scripts.obsp` de **Darksiders II Deathinitive Edition**
 (PC), escrito en Python con solo la biblioteca estándar y tkinter.
 
-> En desarrollo: primer hito (visualizar, editar y guardar en `.obsp` con copia del original).
-> El plan completo está en [PLAN_MAESTRO.md](PLAN_MAESTRO.md).
+Permite ver los 7 862 objetos del archivo, editar sus valores y su estructura, crear cadenas
+nuevas, ver y parchear los scripts compilados, exportar a JSON y CSV, y guardar en el mismo
+formato `.obsp` con una copia intacta del original. Todo se ha probado en el juego. El plan y su
+historial están en [PLAN_MAESTRO.md](PLAN_MAESTRO.md).
 
-## Requisitos
+## Antes de empezar
+
+- **La primera vez que guardas** encima de `scripts.obsp` se crea `scripts.original.obsp`: una
+  copia exacta del archivo tal como estaba, verificada y de solo lectura. Nunca se sobrescribe y
+  **Archivo → Restaurar original** la vuelve a poner en su sitio.
+- **Cierra Darksiders II antes de guardar.** Mientras el juego está abierto, el archivo está en
+  uso y no se puede escribir.
+- **Steam** («Verificar integridad», o una actualización) devuelve el archivo original y borra
+  tus cambios. Guarda antes un parche (**Archivo → Exportar parche…**) para reaplicarlos luego.
+- Haz cambios pequeños y pruébalos: muchos valores del juego no tienen un significado
+  documentado.
+
+## Descarga
+
+Cada release publica `D2ScriptViewer.exe`, un único ejecutable para Windows que no necesita
+Python. Junto a él van los textos de licencia del software de terceros que lleva dentro
+(CPython, Tcl/Tk y el bootloader de PyInstaller); ver
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). La línea de órdenes y los tests necesitan el
+código fuente y Python.
+
+## Requisitos (desde el código fuente)
 
 Python 3.10 o posterior en Windows. No hace falta instalar ningún paquete.
 
 ## Uso
 
-Interfaz gráfica (o doble clic en `D2ScriptViewer.pyw`):
+Interfaz gráfica (o doble clic en `D2ScriptViewer.exe` o en `D2ScriptViewer.pyw`):
 
 ```powershell
 python -m d2scriptviewer
@@ -138,6 +160,21 @@ defecto de Steam, y se omiten si no lo encuentran:
 ```powershell
 $env:D2SV_OBSP = 'C:\ruta\a\scripts.obsp'
 ```
+
+## Construir el ejecutable
+
+El workflow [release.yml](.github/workflows/release.yml) lo construye al subir una etiqueta
+`v*`: pasa los tests, construye la rueda, el código fuente y el `.exe`, ejecuta la autoprueba
+del `.exe` y publica la release con los avisos de terceros. En local:
+
+```powershell
+python -m venv build\venv-pyinstaller
+build\venv-pyinstaller\Scripts\python -m pip install pyinstaller==6.22.3
+build\venv-pyinstaller\Scripts\python -m PyInstaller --noconfirm --workpath build\pyinstaller D2ScriptViewer.spec
+```
+
+El resultado es `dist\D2ScriptViewer.exe`. `D2ScriptViewer.exe --autoprueba informe.txt`
+comprueba el ejecutable sin abrir la ventana: escribe el informe y sale con 0 si todo va bien.
 
 ## Datos del juego
 

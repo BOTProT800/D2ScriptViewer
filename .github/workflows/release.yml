@@ -1,0 +1,85 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Versión fija: su COPYING.txt (GPL-2.0-or-later con la Bootloader Exception) es el que se
+  # verificó al preparar el release. Cambiarla exige volver a comprobarlo (CREDITS.md).
+  PYINSTALLER_VERSION: "6.22.3"
+
+jobs:
+  # Una etiqueta no debería poder publicar un binario de un árbol roto.
+  verificar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests
+        run: python -m unittest discover -s tests -v
+
+  windows:
+    needs: verificar
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar las herramientas de empaquetado
+        run: python -m pip install --upgrade build "pyinstaller==$env:PYINSTALLER_VERSION"
+
+      - name: Construir la rueda y el código fuente
+        run: python -m build --wheel --sdist
+
+      - name: Construir el ejecutable
+        run: python -m PyInstaller --noconfirm --workpath build/pyinstaller D2ScriptViewer.spec
+
+      - name: Comprobar que el ejecutable existe y pesa algo razonable
+        run: |
+          $exe = Get-Item dist/D2ScriptViewer.exe
+          $mb = [math]::Round($exe.Length / 1MB, 1)
+          Write-Output "D2ScriptViewer.exe: $mb MB"
+          if ($exe.Length -lt 5MB) { throw "El ejecutable pesa $mb MB: el bundle parece incompleto" }
+
+      - name: Autoprueba del ejecutable
+        run: |
+          $out = Join-Path $PWD "autoprueba.txt"
+          $p = Start-Process -FilePath dist/D2ScriptViewer.exe -ArgumentList "--autoprueba", "`"$out`"" -Wait -PassThru
+          Get-Content $out -Encoding utf8
+          if ($p.ExitCode -ne 0) { throw "La autoprueba del ejecutable falló (código $($p.ExitCode))" }
+
+      - name: Reunir los avisos de terceros
+        run: |
+          New-Item -ItemType Directory -Force dist/licencias | Out-Null
+          Copy-Item build/licencias/* dist/licencias/
+          Copy-Item THIRD_PARTY_NOTICES.md, LICENSE dist/licencias/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: D2ScriptViewer-windows
+          path: |
+            dist/D2ScriptViewer.exe
+            dist/licencias/*
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Publicar la release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$env:GITHUB_REF_NAME"
+          dist/D2ScriptViewer.exe dist/licencias/LICENSE-Python.txt dist/licencias/LICENSE-PyInstaller.txt
+          dist/licencias/LICENSE-TclTk.txt dist/licencias/VERSIONES.txt dist/licencias/THIRD_PARTY_NOTICES.md
+          dist/licencias/LICENSE dist/*.whl dist/*.tar.gz
+          --title "D2ScriptViewer $env:GITHUB_REF_NAME"
+          --generate-notes

@@ -30,7 +30,10 @@ aviso, y el juego usa una cadena nueva para encontrar una animación del `.upak`
 (scripts compilados) cerrada y validada en el juego: estructura completa, desensamblador y
 parches de literales del mismo tamaño; el juego ejecuta un literal parcheado. Fase 8 (exportación
 JSON/CSV y parches `.d2svpatch.json`) cerrada y validada en el juego: un parche reaplicado tras
-restaurar reproduce byte a byte el archivo guardado a mano. Queda la fase 9 (distribución). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+restaurar reproduce byte a byte el archivo guardado a mano. Fase 9 (distribución) cerrada:
+versión 1.0.0, ejecutable de Windows con PyInstaller 6.22.3 y workflow de release, preparados en
+local; el push, la visibilidad del repositorio y la etiqueta los decide el usuario. Todas las
+fases del plan (0 a 9) están cerradas. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -57,7 +60,13 @@ python -m d2scriptviewer patch aplicar build\x.d2svpatch.json --salida build\y.o
 python -m unittest discover -s tests -v                     # todos los tests
 python -m unittest tests.<modulo>.<Clase>.<test>            # un solo test
 $env:D2SV_OBSP = 'C:\ruta\a\scripts.obsp'                   # archivo real para CLI y tests
+build\venv-pyinstaller\Scripts\python -m PyInstaller --noconfirm --workpath build\pyinstaller D2ScriptViewer.spec
+dist\D2ScriptViewer.exe --autoprueba informe.txt            # autoprueba del .exe (sale con 0 si va bien)
 ```
+
+El entorno `build\venv-pyinstaller` tiene PyInstaller 6.22.3, la versión que fija
+`release.yml` y cuya licencia está verificada en `CREDITS.md`. Cambiarla exige volver a leer su
+`COPYING.txt` y actualizar la entrada.
 
 Los subcomandos (salvo `hash`) leen `--archivo`, o `D2SV_OBSP`, o la ruta del juego. `roundtrip --salida` se
 niega a escribir encima de la entrada, de un archivo existente o de un `*.original.obsp`.
@@ -104,6 +113,11 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
 - `diffing.align`: alineamiento de listas por huellas, compartido por el comparador y los parches.
 - `wording.py`: plurales («1 objeto», «2 objetos»).
 - `verification.py`: las comprobaciones completas que usa `verify`.
+- `selftest.py`: la autoprueba del ejecutable (`MODULES` debe listar todos los módulos; un test lo
+  comprueba). `run_d2scriptviewer.py` es la entrada del `.exe` (siempre GUI, salvo
+  `--autoprueba`), `D2ScriptViewer.spec` la receta de PyInstaller (copia a `build\licencias` los
+  textos de licencia de terceros y `VERSIONES.txt`) y `THIRD_PARTY_NOTICES.md` los explica.
+  `.github/workflows/release.yml` publica la release con una etiqueta `v*`.
 - `gui/`: `app.py` (ventana, hilos, navegación, edición), `object_tree.py`, `property_view.py`,
   `editors.py` (editor en la celda, selector de referencias y `FillNullDialog`), `pending_view.py`, `details.py`,
   `script_view.py`, `search_view.py`, `theme.py`. Los hilos solo encolan mensajes;

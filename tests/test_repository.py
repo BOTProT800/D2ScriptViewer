@@ -67,6 +67,42 @@ class RepositoryTests(unittest.TestCase):
                     with self.subTest(path=path.relative_to(ROOT), module=name):
                         self.assertIn(name.split(".")[0], allowed)
 
+    def test_self_test_lists_every_module(self) -> None:
+        """Un módulo nuevo que no esté en la autoprueba podría quedarse fuera del ejecutable."""
+        from d2scriptviewer.selftest import MODULES
+
+        package = ROOT / "d2scriptviewer"
+        modules = {
+            "d2scriptviewer." + ".".join(path.relative_to(package).with_suffix("").parts)
+            for path in package.rglob("*.py")
+            if path.name not in ("__init__.py", "__main__.py") and path.stem != "selftest"
+        }
+        self.assertEqual(modules, set(MODULES))
+
+    def test_release_recipe(self) -> None:
+        spec = (ROOT / "D2ScriptViewer.spec").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(tuple(spec[:2]), SPDX)
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        pinned = next(line.split('"')[1] for line in workflow.splitlines() if "PYINSTALLER_VERSION:" in line)
+        credits = (ROOT / "CREDITS.md").read_text(encoding="utf-8")
+        self.assertIn(f"PyInstaller {pinned}", credits)  # la versión cuya licencia se verificó
+        for name in ("LICENSE", "CREDITS.md", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md"):
+            self.assertTrue((ROOT / name).is_file(), name)
+
+    def test_self_test_passes(self) -> None:
+        from d2scriptviewer.selftest import run_self_test
+
+        try:
+            import tkinter
+
+            tkinter.Tcl()
+            gui = True
+        except Exception:  # noqa: BLE001 - sin Tk, la parte gráfica se omite
+            gui = False
+        ok, lines = run_self_test(gui=gui)
+        self.assertTrue(ok, "\n".join(lines))
+        self.assertEqual(lines[-1], "Todo correcto")
+
     def test_version_lives_only_in_package(self) -> None:
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('version = { attr = "d2scriptviewer.__version__" }', pyproject)

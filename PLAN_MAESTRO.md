@@ -1,5 +1,64 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 9 cerrada (2026-10-04): versión 1.0.0 preparada para publicar.** Con ella se completan
+> las fases 0 a 9.
+>
+> - PyInstaller 6.22.3 se instaló en `build\venv-pyinstaller`. Su `COPYING.txt` confirma la
+>   GPL-2.0-or-later con la *Bootloader Exception*, y que los *run-time hooks* que se incrustan
+>   son Apache-2.0. Así queda resuelto el punto que Darkstractor dejó pendiente.
+> - `D2ScriptViewer.spec` construye `dist\D2ScriptViewer.exe` (11,7 MB), que lleva dentro
+>   `LICENSE`, `CREDITS.md`, `CHANGELOG.md`, `THIRD_PARTY_NOTICES.md` y `licencias\`:
+>   - `LICENSE-Python.txt`, que incluye OpenSSL, libffi, bzip2, zlib y el runtime de Microsoft;
+>   - `LICENSE-PyInstaller.txt` y `LICENSE-TclTk.txt`;
+>   - `VERSIONES.txt`: Python 3.12.5, PyInstaller 6.22.3, Tcl/Tk 8.6.13, OpenSSL 3.0.13 y
+>     zlib 1.3.1.
+> - `--autoprueba` del `.exe` congelado: 29 módulos, hash, OBSP sintético con `verify`, los 8
+>   archivos incluidos y la ventana principal sin mostrarla: todo correcto, código de salida 0.
+> - La rueda `d2scriptviewer-1.0.0` se construye con su `LICENSE`.
+> - `release.yml` reproduce todo esto en GitHub con una etiqueta `v*` y adjunta los avisos a la
+>   release. `tests.yml` comprueba todos los módulos y ejecuta la autoprueba.
+>
+> Criterios de «Hecho cuando»: receta y entrada (sí); autoprueba (sí); workflows (sí, sin
+> ejecutar en GitHub porque el push lo hace el usuario); avisos de terceros, `CREDITS.md` y
+> README (sí); versión 1.0.0 (sí); `.exe` construido en local y con la autoprueba superada (sí).
+> 214 tests.
+>
+> **Desviación:** la CI de GitHub nunca se ha ejecutado; se reproduce en local con Python
+> 3.12.5. El usuario decide el push, si el repositorio es público y la etiqueta `v1.0.0`.
+>
+> **Decisiones de la fase 9 (2026-10-04)**, confirmadas por el usuario tras leer la entrada de
+> PyInstaller del `CREDITS.md` de Darkstractor.
+>
+> Esa entrada da la licencia de PyInstaller como GPL-2.0-or-later con una excepción para el
+> bootloader, por verificar en el `COPYING.txt` de la versión usada. Además, publicar el `.exe`
+> redistribuye binarios de terceros: el bootloader, CPython y, en este proyecto, también Tcl/Tk,
+> OpenSSL y libffi. Hay un remoto (`origin`, GitHub) que el usuario añadió; `origin/main` estaba
+> en `1d8a7bd`.
+>
+> - **Publicación:** solo en local. El usuario hace el push, decide si el repositorio es público
+>   y crea la etiqueta del release.
+> - **Versión del primer release:** 1.0.0.
+> - **PyInstaller en local:** en un entorno virtual dentro de `build\` (ignorado por git), con
+>   versión fija. La licencia se verifica en su `COPYING.txt` y el `.exe` se prueba con una
+>   autoprueba.
+> - **Ejecutables:** solo la GUI, un único `D2ScriptViewer.exe` sin consola. La CLI sigue
+>   disponible con Python.
+>
+> **Hecho cuando:**
+>
+> - `D2ScriptViewer.spec` (un archivo, sin consola, con `LICENSE`, `CREDITS.md`,
+>   `CHANGELOG.md`, `THIRD_PARTY_NOTICES.md` y los textos de licencia de terceros dentro) y un
+>   script de entrada que abre la GUI;
+> - una autoprueba oculta (`--autoprueba archivo`) que importa los módulos, comprueba el hash,
+>   construye un OBSP en memoria, pasa `verify` y crea una ventana Tk;
+> - `release.yml` como el de Darkstractor: con una etiqueta `v*`, tests, rueda, sdist y `.exe`,
+>   comprobación de tamaño, autoprueba y release con el `.exe` y los avisos. `tests.yml` comprueba
+>   también los módulos nuevos;
+> - `THIRD_PARTY_NOTICES.md`, la entrada de PyInstaller en `CREDITS.md` con la licencia
+>   comprobada, y el README con la guía de uso y las advertencias;
+> - la versión 1.0.0 en `__init__.py` y en `CHANGELOG.md`;
+> - el `.exe` se construye en local y pasa la autoprueba. Sin push, etiqueta ni release.
+>
 > **Fase 8 cerrada (2026-10-04)** con la prueba en el juego (detalle en
 > `research/PRUEBAS_EN_JUEGO.md`). El usuario editó a mano, guardó, exportó el parche, restauró,
 > lo reaplicó, guardó y jugó.

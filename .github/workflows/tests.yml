@@ -25,7 +25,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Comprobar que no hacen falta dependencias externas
-        run: python -c "import d2scriptviewer, d2scriptviewer.cli, d2scriptviewer.document, d2scriptviewer.verification, d2scriptviewer.search, d2scriptviewer.edits, d2scriptviewer.saving, d2scriptviewer.diffing, d2scriptviewer.validation, d2scriptviewer.gui.app"
+        run: python -c "import importlib, d2scriptviewer.selftest as t; [importlib.import_module(m) for m in t.MODULES]"
+
+      - name: Autoprueba (la misma que el ejecutable)
+        run: python -c "import sys, d2scriptviewer.selftest as t; ok, lines = t.run_self_test(); print(*lines, sep=chr(10)); sys.exit(0 if ok else 1)"
 
       - name: Versión
         run: python -m d2scriptviewer --version

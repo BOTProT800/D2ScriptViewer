@@ -7,8 +7,21 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-04
+
+Primer release.
+
 ### Added
 
+- Ejecutable de Windows (fase 9): `D2ScriptViewer.spec` construye con PyInstaller un único
+  `D2ScriptViewer.exe` sin consola, con la licencia, los créditos, el historial y los textos de
+  licencia de los componentes de terceros que lleva dentro (`THIRD_PARTY_NOTICES.md`, carpeta
+  `licencias` y `VERSIONES.txt` con la versión exacta de cada uno).
+- `--autoprueba informe.txt` en el ejecutable: módulos, función de hash, un OBSP sintético con
+  `verify`, archivos incluidos y la ventana principal, sin mostrarla. También se ejecuta en la CI.
+- Workflow de release: con una etiqueta `v*` pasa los tests, construye la rueda, el código fuente y
+  el `.exe` (PyInstaller 6.22.3, versión fija), ejecuta su autoprueba y publica la release con
+  los avisos de terceros.
 - Exportación (fase 8): un JSON por objeto con el árbol tipado y las referencias resueltas (los
   scripts, con miembros y código desensamblado), `manifest.json` y un CSV por cada `FloatTable`.
   Archivo → Exportar a JSON y CSV… y `python -m d2scriptviewer export`.
@@ -98,6 +111,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ### Changed
 
+- Versión 1.0.0. El README explica la descarga, las advertencias de uso y cómo construir el
+  ejecutable; la CI de tests comprueba todos los módulos y ejecuta la autoprueba.
 - Los floats se muestran en notación decimal (`200`, no `2e+02`) salvo en magnitudes extremas.
 - Darksiders2DLL ya no lee ni fija `scripts.obsp` (su modo `scripts=inventory` se retiró): el
   diálogo de guardado, el README y el plan dejan de mencionarlo.
