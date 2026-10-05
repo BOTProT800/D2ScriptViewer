@@ -1,5 +1,29 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 8 cerrada (2026-10-04)** con la prueba en el juego (detalle en
+> `research/PRUEBAS_EN_JUEGO.md`). El usuario editó a mano, guardó, exportó el parche, restauró,
+> lo reaplicó, guardó y jugó.
+>
+> - La versión hecha a mano y la reaplicada son idénticas (SHA `BC3F812B…`, 18 334 632 bytes), y
+>   el juego refleja el salto alto. Al terminar quedó restaurado `B46DD3DA…`.
+> - El muñeco del menú no hizo el combo porque la edición se hizo en `Animations[435].Name` y no
+>   en `AnimationName`, la fila prevista. Es la misma en las dos versiones, así que no afecta al
+>   parche. Con el usuario se decidió cerrar con este resultado.
+>
+> Criterios de «Hecho cuando»:
+>
+> 1. Exportar JSON por objeto, `manifest.json` y CSV de las `FloatTable`, en un hilo y nunca
+>    dentro de la carpeta del juego: sí.
+> 2. Crear el parche con valores y estructura sin datos del juego, autoverificado: sí.
+> 3. Aplicarlo como cambios pendientes que se deshacen (o a un archivo nuevo en la CLI), con
+>    rechazo claro si algo no coincide: sí.
+> 4. Tests sintéticos de cada operación y de los rechazos, más los del archivo real: sí.
+> 5. En el juego: guardar a mano, exportar, restaurar, reaplicar, mismo SHA y jugar: sí.
+> 6. Plan, `CLAUDE.md`, `CHANGELOG.md` y README: sí.
+>
+> 211 tests. Siguiente paso: la fase 9 (distribución), empezando por la entrada de PyInstaller
+> de Darkstractor y las decisiones del usuario (repositorio, CI, release y versión).
+>
 > **Fase 8 implementada (2026-10-04)**, antes de la prueba en el juego (punto de control):
 >
 > - `export.py`: JSON por objeto, `manifest.json` y CSV de las `FloatTable`. Con el archivo

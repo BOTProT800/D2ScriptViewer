@@ -17,6 +17,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   crearlo se reaplica sobre la base y debe dar el mismo archivo. Al aplicarlo se comprueban
   objeto, propiedad, valor anterior y huellas; o se aplica entero, como un paso de deshacer, o no
   se aplica. Archivo → Exportar parche… / Aplicar parche…, y `patch crear` / `patch aplicar`.
+- Prueba en el juego del parche (`research/PRUEBAS_EN_JUEGO.md`): tras restaurar, el parche
+  reaplicado da el mismo archivo, byte a byte, que el guardado a mano.
 - Scripts compilados (fase 7): estructura completa del cuerpo (miembros con sus valores por
   defecto, valores iniciales, funciones y estados) y desensamblador de los 57 opcodes, verificados
   en los 3 690 scripts del juego, que se reserializan idénticos. El panel central muestra los

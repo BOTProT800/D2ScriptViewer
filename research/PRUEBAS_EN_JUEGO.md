@@ -286,3 +286,76 @@ El juego carga un script compilado con un literal parcheado por la herramienta (
 estructura intacta) y ejecuta el valor nuevo: la interpretación del bytecode de la fase 7 es
 correcta al menos para ese literal y su llamada. Parchear literales de scripts sin cambiar
 tamaños es viable.
+
+## Fase 8 — reaplicar un parche tras restaurar (2026-10-04)
+
+Comprueba el uso previsto del parche: recuperar los cambios después de que Steam (o Restaurar
+original) devuelva el archivo de partida. Las ediciones son las ya probadas en el juego en las
+fases 5 y 6, así que lo que se prueba es que el parche reproduce el archivo guardado a mano.
+
+### Ediciones y pasos
+
+1. **A mano**, sobre el original de Steam:
+   - duplicar `MoveStates[0]` de `death/playercommon_movestates`;
+   - `MoveStates[45].JumpImpulse` 350 → 700 (el estado «Jump», desplazado por la inserción);
+   - `Animations[435].AnimationName` de `death/death_animations` (`PaperDoll_Idle`):
+     `D_Idle` → `D_WScy_Combo04`.
+
+   Guardar.
+2. **Archivo → Exportar parche…**, fuera de la carpeta del juego. La base es
+   `scripts.original.obsp`.
+3. **Archivo → Restaurar original.**
+4. **Archivo → Aplicar parche…** y guardar.
+5. Jugar y, al terminar, restaurar.
+
+### Ensayo sobre una copia
+
+- Paso 1: 18 334 652 bytes, SHA `AF244850234B2FD80DC187FB7952EF47C0C7AC865329C4E6C76A28A01B5FFB6C`.
+- Paso 2: parche de 1 834 bytes, «2 objetos, 3 operaciones (1 insertar, 2 valor)», base
+  `scripts.original.obsp` (original de Steam).
+- Paso 3: `B46DD3DA…`.
+- Paso 4: el mismo SHA `AF244850…` que el paso 1, y `verify` correcto.
+- **Efecto esperado en el juego:** el de las fases 5 y 6. Salto normal mucho más alto, y el
+  muñeco del menú haciendo el combo de guadaña (y quieto en el último fotograma).
+- **Estado de la instalación antes de la prueba** (leído en solo lectura): `scripts.obsp`
+  original de Steam (`B46DD3DA…`, 17:33:22), `scripts.original.obsp` intacto (03:42:21) y 5
+  copias rotativas, la última de las 17:33:22.
+
+### Resultado (2026-10-04)
+
+El usuario hizo los pasos con la herramienta sobre el archivo instalado e informó de que «todo
+funcionó bien» salvo que el muñeco del menú no hizo el combo de guadaña; estaba quieto, en su
+pose normal.
+
+**Evidencia en la instalación**, leída después del informe y solo para leer:
+
+- **18:30:17, guardado a mano.** La copia rotativa `scripts.20261004-183017-836720.obsp` es el
+  original (`B46DD3DA…`), la versión previa.
+- **18:48:56, restauración.** La copia rotativa `scripts.20261004-184856-352651.obsp` guarda la
+  versión hecha a mano: 18 334 632 bytes, SHA `BC3F812B0F190511…`.
+- **18:49:09, guardado tras aplicar el parche.** La copia rotativa de ese momento es el original
+  (`B46DD3DA…`).
+- **18:50:56, restauración.** La copia rotativa `scripts.20261004-185056-985591.obsp` guarda la
+  versión reaplicada: **el mismo SHA `BC3F812B…` que la hecha a mano**.
+- **Archivo instalado:** `B46DD3DA…`, original de Steam. `scripts.original.obsp` sigue intacto
+  (03:42:21).
+- **Copias rotativas:** quedan las últimas 5.
+
+**Por qué no salió el combo:** comparar la versión jugada con el original da tres cambios:
+duplicar `MoveStates[0]`, `MoveStates[45].JumpImpulse` 350 → 700 y
+`Animations[435].Name` `PaperDoll_Idle` → `D_WScy_Combo04`. El último se hizo en `Name`, la fila
+de encima de `AnimationName`, que era la prevista. Como los dos textos miden 14 caracteres, el
+archivo no creció los 20 bytes del ensayo (18 334 632 en vez de 18 334 652). Con la entrada
+renombrada, el juego no encuentra una animación llamada `PaperDoll_Idle` y el muñeco se queda en
+su pose normal. **Hipótesis**, coherente con la fase 6 (donde cambiar `AnimationName` sí hizo
+que el muñeco hiciera el combo): el muñeco del menú busca su animación por el `Name`
+`PaperDoll_Idle` y, si no la encuentra, no se anima.
+
+### Conclusión
+
+Con el usuario se decidió cerrar la prueba con este resultado:
+
+- lo que se probaba, que un parche reaplicado tras restaurar reproduce el archivo guardado a
+  mano, se cumplió byte a byte (mismo SHA), y el juego lo cargó con su efecto (salto alto);
+- la parte del muñeco no dependía del parche, sino de qué campo se editó, que fue el mismo en
+  las dos versiones.

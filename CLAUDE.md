@@ -29,8 +29,8 @@ es un CRC-64 reflejado (deducido de los datos), los valores `0F` admiten cadenas
 aviso, y el juego usa una cadena nueva para encontrar una animación del `.upak`. Fase 7
 (scripts compilados) cerrada y validada en el juego: estructura completa, desensamblador y
 parches de literales del mismo tamaño; el juego ejecuta un literal parcheado. Fase 8 (exportación
-JSON/CSV y parches `.d2svpatch.json`) implementada; falta la prueba en el juego. Después, la
-fase 9 (distribución). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+JSON/CSV y parches `.d2svpatch.json`) cerrada y validada en el juego: un parche reaplicado tras
+restaurar reproduce byte a byte el archivo guardado a mano. Queda la fase 9 (distribución). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
