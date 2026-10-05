@@ -90,6 +90,22 @@ Avisos:
   herramienta lo dice.
 - «Verificar integridad de los archivos» de Steam, o una actualización, devuelven el original.
 
+### Exportar y parches
+
+- **Exportar a JSON y CSV…** escribe, en una carpeta vacía y nunca dentro de la del juego, un
+  JSON por objeto (árbol con tipos y referencias resueltas; los scripts, con sus miembros y su
+  código desensamblado), un `manifest.json` con el índice y un CSV por cada `FloatTable`. Es
+  solo para leer o comparar: no se vuelve a importar.
+- **Exportar parche…** guarda un `.d2svpatch.json` con lo que cambió respecto al original
+  (`scripts.original.obsp` si existe). Lleva solo valores, rutas y operaciones de estructura que
+  copian contenido del propio original: se puede compartir sin distribuir datos del juego.
+  Antes de escribirlo, la herramienta lo reaplica sobre el original y comprueba que da
+  exactamente el archivo actual.
+- **Aplicar parche…** aplica un parche como cambios pendientes (se deshacen de una vez con
+  Ctrl+Z) que luego se guardan como siempre. Sirve, por ejemplo, para recuperar tus cambios
+  después de que Steam restaure el original. Si algún objeto, propiedad o valor no es el que
+  espera el parche, no se aplica nada.
+
 Línea de órdenes:
 
 ```powershell
@@ -99,9 +115,14 @@ python -m d2scriptviewer show death/death_desc --profundidad 3
 python -m d2scriptviewer verify
 python -m d2scriptviewer hash Death death/death_desc
 python -m d2scriptviewer disasm death/death
+python -m d2scriptviewer export --salida C:\exportado --tipo FloatTable
+python -m d2scriptviewer patch crear --salida cambios.d2svpatch.json
+python -m d2scriptviewer patch aplicar cambios.d2svpatch.json --salida C:\copia\scripts.obsp
 ```
 
-Todas salvo `hash` aceptan `--archivo ruta\a\scripts.obsp`. `hash` calcula el hash de 64 bits
+Todas salvo `hash` aceptan `--archivo ruta\a\scripts.obsp`. `patch crear` usa como base
+`--base` o el `*.original.obsp` junto al archivo, y `patch aplicar` escribe siempre un archivo
+nuevo. `hash` calcula el hash de 64 bits
 del juego para cada texto y el `idObjeto` que tendría un objeto con ese nombre, sin leer ningún
 archivo.
 

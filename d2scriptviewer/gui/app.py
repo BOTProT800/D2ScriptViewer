@@ -22,7 +22,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
-from .. import __version__, edits, saving
+from .. import __version__, edits, export, patches, saving
 from ..document import Document
 from ..edits import EditGroup
 from ..errors import D2ScriptViewerError, EditError
@@ -63,7 +63,9 @@ class ViewerApp(tk.Tk):
         self.history_back: list[int] = []
         self.history_forward: list[int] = []
         self.index_cancel = threading.Event()
-        self.tokens = {"open": 0, "index": 0, "decode": 0, "save": 0, "restore": 0}
+        self.tokens = {"open": 0, "index": 0, "decode": 0, "save": 0, "restore": 0, "export": 0, "patch": 0}
+        #: Hay una exportación o un parche en curso (trabajan sobre una instantánea).
+        self.exporting = False
         self.search_window: SearchWindow | None = None
         self.pending_window: PendingChangesWindow | None = None
         #: Confirmaciones sí/no y sí/no/cancelar; los tests las sustituyen para no abrir diálogos.
@@ -110,6 +112,10 @@ class ViewerApp(tk.Tk):
         self.file_menu.add_command(label="Guardar como…", accelerator="Ctrl+Mayús+S", command=self.save_as)
         self.file_menu.add_separator()
         self.file_menu.add_command(label="Restaurar original…", command=self.restore_original_file)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Exportar a JSON y CSV…", command=self.export_files)
+        self.file_menu.add_command(label="Exportar parche…", command=self.export_patch)
+        self.file_menu.add_command(label="Aplicar parche…", command=self.apply_patch_file)
         self.file_menu.add_checkbutton(
             label=f"Copia rotativa de la versión anterior (últimas {saving.KEEP_BACKUPS})",
             variable=self.rotating_var,
@@ -980,6 +986,159 @@ class ViewerApp(tk.Tk):
         origin = "el original de Steam" if payload.is_steam else "la copia del original"
         self.inform(APP_NAME, f"{payload.path.name} vuelve a ser {origin}.\nSHA-256 {payload.sha256}")
         self.open_file(payload.path)
+
+    # --- Exportar y parches (fase 8) --------------------------------------------------
+
+    def _snapshot(self) -> Document | None:
+        """Copia del estado actual para trabajar en un hilo sin competir con las ediciones."""
+        document = self.document
+        if document is None or self.saving or self.exporting or not self._commit_pending_editor():
+            return None
+        try:
+            return Document.from_bytes(document.current_data(), document.path)
+        except D2ScriptViewerError as error:
+            self.alert(APP_NAME, str(error))
+            return None
+
+    def export_files(self, folder: Path | None = None) -> None:
+        document = self.document
+        if document is None or self.saving or self.exporting:
+            return
+        if folder is None:
+            selected = filedialog.askdirectory(parent=self, title="Exportar a JSON y CSV (carpeta vacía)",
+                                               mustexist=False)
+            if not selected:
+                return
+            folder = Path(selected)
+        try:
+            export.check_destination(folder)
+        except D2ScriptViewerError as error:
+            self.alert(APP_NAME, str(error))
+            return
+        snapshot = self._snapshot()
+        if snapshot is None:
+            return
+        unsaved, source = set(document.modified_positions), document.path
+        token = self.tokens["export"] + 1
+
+        def progress(done: int, total: int) -> None:
+            self.messages.put(("export-progress", token, (done, total)))
+
+        self.exporting = True
+        self.status_var.set(f"Exportando a {folder}…")
+        self._spawn("export", lambda: export.export_document(snapshot, folder, progress=progress,
+                                                             unsaved=unsaved, source=source))
+
+    def _on_export_progress(self, token: int, payload: object) -> None:
+        if token != self.tokens["export"]:
+            return
+        done, total = payload  # type: ignore[misc]
+        self.progress.configure(maximum=max(total, 1), value=done)
+
+    def _on_export(self, token: int, payload: object) -> None:
+        if token != self.tokens["export"]:
+            return
+        self.exporting = False
+        self.progress.configure(value=0)
+        if isinstance(payload, BaseException):
+            self.status_var.set("No se exportó")
+            message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
+            self.alert(APP_NAME, f"No se exportó.\n\n{message}")
+            return
+        assert isinstance(payload, export.ExportResult)
+        self.status_var.set(payload.summary())
+        self.inform(APP_NAME, payload.summary())
+
+    def export_patch(self, target: Path | None = None) -> None:
+        document = self.document
+        if document is None or self.saving or self.exporting:
+            return
+        try:
+            base_data, base_label = patches.base_for(document)
+        except OSError as error:
+            self.alert(APP_NAME, f"No se pudo leer el original: {error}")
+            return
+        snapshot = self._snapshot()
+        if snapshot is None:
+            return
+        if snapshot.obsp.data == base_data:
+            self.inform(APP_NAME, f"No hay diferencias con la base ({base_label}): no hay nada que poner en un parche.")
+            return
+        if target is None:
+            current = document.path
+            selected = filedialog.asksaveasfilename(
+                parent=self,
+                title="Exportar parche",
+                defaultextension=patches.PATCH_SUFFIX,
+                initialdir=str(current.parent) if current and not self._in_game_folder(current) else None,
+                initialfile="cambios" + patches.PATCH_SUFFIX,
+                filetypes=[("Parches de D2ScriptViewer", "*" + patches.PATCH_SUFFIX), ("Todos los archivos", "*.*")],
+            )
+            if not selected:
+                return
+            target = Path(selected)
+        destination = target
+
+        def work() -> tuple[Path, str, dict[str, object]]:
+            patch = patches.create_patch(base_data, snapshot)
+            patches.save_patch(patch, destination)
+            return destination, base_label, patch
+
+        self.exporting = True
+        self.status_var.set("Creando el parche y comprobándolo sobre la base…")
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(15)
+        self._spawn("patch", work)
+
+    def _on_patch(self, token: int, payload: object) -> None:
+        if token != self.tokens["patch"]:
+            return
+        self.exporting = False
+        self.progress.stop()
+        self.progress.configure(mode="determinate", value=0)
+        if isinstance(payload, BaseException):
+            self.status_var.set("No se creó el parche")
+            message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
+            self.alert(APP_NAME, f"No se creó el parche.\n\n{message}")
+            return
+        target, base_label, patch = payload  # type: ignore[misc]
+        steam = "original de Steam" if patch["base"]["original_de_steam"] else "no es el original de Steam"
+        self.status_var.set(f"Parche guardado en {target.name}")
+        self.inform(
+            APP_NAME,
+            f"Parche guardado en {target}.\n\n• {patches.patch_summary(patch)}.\n"
+            f"• Base: {base_label} ({steam}).\n"
+            "• Comprobado: reaplicado sobre la base da exactamente el archivo actual.",
+        )
+
+    def apply_patch_file(self, source: Path | None = None) -> None:
+        document = self.document
+        if document is None or self.saving or self.exporting or not self._commit_pending_editor():
+            return
+        if source is None:
+            selected = filedialog.askopenfilename(
+                parent=self,
+                title="Aplicar parche",
+                filetypes=[("Parches de D2ScriptViewer", "*" + patches.PATCH_SUFFIX), ("Todos los archivos", "*.*")],
+            )
+            if not selected:
+                return
+            source = Path(selected)
+        try:
+            patch = patches.load_patch(source)
+            group = patches.apply_patch(document, patch, source.name)
+        except D2ScriptViewerError as error:
+            self.alert(APP_NAME, f"No se aplicó el parche.\n\n{error}")
+            return
+        if group is None:
+            self.inform(APP_NAME, "El parche no tiene cambios.")
+            return
+        self._after_change(group, reveal=True)
+        self.inform(
+            APP_NAME,
+            f"Parche aplicado: {patches.patch_summary(patch)}.\n\nSon cambios pendientes: revísalos con Ctrl+P, "
+            "deshazlos todos con Ctrl+Z o guárdalos con Ctrl+S.",
+        )
 
     # --- Búsqueda ------------------------------------------------------------------------
 

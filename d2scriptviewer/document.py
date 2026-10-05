@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from . import diffing, edits
 from .diffing import Change
@@ -365,6 +366,34 @@ class Document:
     def redo_description(self) -> str | None:
         return self._redo[-1].description if self._redo else None
 
+    def run_operations(self, description: str, build: Callable[[Callable[[object], None]], None]) -> EditGroup | None:
+        """Aplica operaciones una a una, cada una sobre el árbol que dejó la anterior.
+
+        ``build`` recibe ``do(operación)``, que la aplica en el acto, y puede leer el árbol
+        entre una y otra. Si ``build`` lanza, se deshacen las ya aplicadas y el documento
+        queda como estaba. Todo junto es un único paso de deshacer.
+        """
+        applied: list[object] = []
+
+        def do(operation: object) -> None:
+            self._apply_one(operation, forward=True)
+            applied.append(operation)
+
+        try:
+            build(do)
+        except BaseException:
+            for operation in reversed(applied):
+                self._apply_one(operation, forward=False)
+            self.version += 1
+            raise
+        self.version += 1
+        if not applied:
+            return None
+        group = EditGroup(tuple(applied), description)
+        self._undo.append(group)
+        self._redo.clear()
+        return group
+
     def _push(self, group: EditGroup) -> EditGroup:
         self._apply(group, forward=True)
         self._undo.append(group)
@@ -374,16 +403,19 @@ class Document:
     def _apply(self, group: EditGroup, *, forward: bool) -> None:
         operations = group.edits if forward else tuple(reversed(group.edits))
         for operation in operations:
-            position = operation.position
-            if isinstance(operation, ReplaceTree):
-                self._bod_cache[position] = operation.after if forward else operation.before
-            elif forward:
-                operation.apply(self.bod(position))
-            else:
-                operation.revert(self.bod(position))
-            self._touched.add(position)
-            self._encoded.pop(position, None)
+            self._apply_one(operation, forward=forward)
         self.version += 1
+
+    def _apply_one(self, operation: object, *, forward: bool) -> None:
+        position = operation.position  # type: ignore[attr-defined]
+        if isinstance(operation, ReplaceTree):
+            self._bod_cache[position] = operation.after if forward else operation.before
+        elif forward:
+            operation.apply(self.bod(position))  # type: ignore[attr-defined]
+        else:
+            operation.revert(self.bod(position))  # type: ignore[attr-defined]
+        self._touched.add(position)
+        self._encoded.pop(position, None)
 
     # --- Decodificación ----------------------------------------------------------------------
 

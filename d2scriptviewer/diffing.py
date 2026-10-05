@@ -111,56 +111,93 @@ class _Differ:
             self.sequence(old.items, new.items, path, old_path)
 
     def sequence(self, old_items: list, new_items: list, path: tuple, old_path: tuple) -> None:
-        old_prints = [bod.fingerprint(item) for item in old_items]
-        new_prints = [bod.fingerprint(item) for item in new_items]
-        if old_prints == new_prints:
-            return
-        start = 0
-        while start < len(old_prints) and start < len(new_prints) and old_prints[start] == new_prints[start]:
-            start += 1
-        old_end, new_end = len(old_prints), len(new_prints)
-        while old_end > start and new_end > start and old_prints[old_end - 1] == new_prints[new_end - 1]:
-            old_end -= 1
-            new_end -= 1
-        old_middle = list(range(start, old_end))
-        new_middle = list(range(start, new_end))
-        if len(old_middle) * len(new_middle) > LCS_LIMIT:
+        alignment = align(old_items, new_items)
+        if alignment is None:
             self.add("lista", path, f"{len(old_items)} elementos", f"{len(new_items)} elementos")
             return
-        matched_old, matched_new = _lcs(
-            [old_prints[i] for i in old_middle], [new_prints[j] for j in new_middle]
-        )
-        free_old = [old_middle[i] for i in range(len(old_middle)) if i not in matched_old]
-        free_new = [new_middle[j] for j in range(len(new_middle)) if j not in matched_new]
-        # Mismo contenido en otra posición: se movió.
-        waiting: dict[bytes, list[int]] = {}
-        for index in free_old:
-            waiting.setdefault(old_prints[index], []).append(index)
-        still_new = []
-        for index in free_new:
-            queue = waiting.get(new_prints[index])
-            if queue:
-                source = queue.pop(0)
-                free_old.remove(source)
-                self.add("movido", path + (index,), f"posición [{source}]", f"posición [{index}]")
-            else:
-                still_new.append(index)
-        # Lo que queda se empareja en orden si es del mismo tipo: elemento modificado.
-        remaining_old = list(free_old)
-        for index in list(still_new):
-            if not remaining_old:
-                break
-            source = remaining_old[0]
-            if _same_shape(old_items[source], new_items[index]):
-                remaining_old.pop(0)
-                still_new.remove(index)
-                self.compare(old_items[source], new_items[index], path + (index,), old_path + (source,))
-        for index in still_new:
+        for source, index in alignment.moved:
+            self.add("movido", path + (index,), f"posición [{source}]", f"posición [{index}]")
+        for source, index in alignment.modified:
+            self.compare(old_items[source], new_items[index], path + (index,), old_path + (source,))
+        for index in alignment.added:
             self.add("añadido", path + (index,), "—", describe(new_items[index], self.ref_label))
         container = self.label(path)
-        for index in remaining_old:
+        for index in alignment.removed:
             self.add("eliminado", path, describe(old_items[index], self.ref_label), "—",
                      label=f"{container}[{index}] (posición original)")
+
+
+@dataclass
+class Alignment:
+    """Cómo se corresponden los elementos de una lista original y de la actual."""
+
+    equal: list[tuple[int, int]]
+    """(original, actual) con el mismo contenido y en el mismo orden relativo."""
+    moved: list[tuple[int, int]]
+    """(original, actual) con el mismo contenido en otra posición."""
+    modified: list[tuple[int, int]]
+    """(original, actual) de la misma forma pero con otro contenido."""
+    added: list[int]
+    removed: list[int]
+
+    def source_of(self) -> dict[int, int]:
+        """Índice actual → índice original de todo lo que tiene pareja."""
+        return {new: old for old, new in self.equal + self.moved + self.modified}
+
+
+def align(old_items: list, new_items: list, limit: int = LCS_LIMIT) -> Alignment | None:
+    """Alinea por huellas con la subsecuencia común más larga; ``None`` si la parte cambiada
+    supera ``limit`` (producto de longitudes)."""
+    old_prints = [bod.fingerprint(item) for item in old_items]
+    new_prints = [bod.fingerprint(item) for item in new_items]
+    if old_prints == new_prints:
+        return Alignment([(index, index) for index in range(len(old_items))], [], [], [], [])
+    start = 0
+    while start < len(old_prints) and start < len(new_prints) and old_prints[start] == new_prints[start]:
+        start += 1
+    old_end, new_end = len(old_prints), len(new_prints)
+    while old_end > start and new_end > start and old_prints[old_end - 1] == new_prints[new_end - 1]:
+        old_end -= 1
+        new_end -= 1
+    old_middle = list(range(start, old_end))
+    new_middle = list(range(start, new_end))
+    if len(old_middle) * len(new_middle) > limit:
+        return None
+    matched_old, matched_new = _lcs(
+        [old_prints[i] for i in old_middle], [new_prints[j] for j in new_middle]
+    )
+    equal = [(index, index) for index in range(start)]
+    equal += list(zip([old_middle[i] for i in sorted(matched_old)], [new_middle[j] for j in sorted(matched_new)]))
+    shift = len(new_prints) - len(old_prints)
+    equal += [(index, index + shift) for index in range(old_end, len(old_prints))]
+    free_old = [old_middle[i] for i in range(len(old_middle)) if i not in matched_old]
+    free_new = [new_middle[j] for j in range(len(new_middle)) if j not in matched_new]
+    # Mismo contenido en otra posición: se movió.
+    waiting: dict[bytes, list[int]] = {}
+    for index in free_old:
+        waiting.setdefault(old_prints[index], []).append(index)
+    moved = []
+    still_new = []
+    for index in free_new:
+        queue = waiting.get(new_prints[index])
+        if queue:
+            source = queue.pop(0)
+            free_old.remove(source)
+            moved.append((source, index))
+        else:
+            still_new.append(index)
+    # Lo que queda se empareja en orden si es del mismo tipo: elemento modificado.
+    modified = []
+    remaining_old = list(free_old)
+    for index in list(still_new):
+        if not remaining_old:
+            break
+        source = remaining_old[0]
+        if _same_shape(old_items[source], new_items[index]):
+            remaining_old.pop(0)
+            still_new.remove(index)
+            modified.append((source, index))
+    return Alignment(sorted(equal), moved, modified, still_new, remaining_old)
 
 
 def _same_shape(old: object, new: object) -> bool:

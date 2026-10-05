@@ -102,6 +102,20 @@ class CliTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("no es un script", err)
 
+    def test_export(self) -> None:
+        folder = self.folder / "tablas"
+        code, out, err = run("export", "--archivo", str(self.file), "--salida", str(folder), "--tipo", "FloatTable")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Exportados 1 objetos y 1 tablas CSV", out)
+        self.assertEqual(sorted(path.name for path in folder.rglob("*") if path.is_file()),
+                         ["char_test.csv", "char_test.json", "manifest.json"])
+        code, out, err = run("export", "--archivo", str(self.file), "--salida", str(folder), "--filtro", "death")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Exportados 1 objetos y 0 tablas CSV", out)
+        code, _out, err = run("export", "--archivo", str(self.file), "--salida", str(self.file.parent))
+        self.assertEqual(code, 2)
+        self.assertIn("no está vacía", err)
+
     def test_hash_needs_no_file(self) -> None:
         code, out, _err = run("hash", "123456789", "Death")
         self.assertEqual(code, 0, out)

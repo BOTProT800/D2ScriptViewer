@@ -9,6 +9,14 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ### Added
 
+- Exportación (fase 8): un JSON por objeto con el árbol tipado y las referencias resueltas (los
+  scripts, con miembros y código desensamblado), `manifest.json` y un CSV por cada `FloatTable`.
+  Archivo → Exportar a JSON y CSV… y `python -m d2scriptviewer export`.
+- Parches `.d2svpatch.json` (fase 8): lo que cambió respecto al original, por objeto, con valores
+  y operaciones de estructura que solo copian contenido del original (sin datos del juego). Al
+  crearlo se reaplica sobre la base y debe dar el mismo archivo. Al aplicarlo se comprueban
+  objeto, propiedad, valor anterior y huellas; o se aplica entero, como un paso de deshacer, o no
+  se aplica. Archivo → Exportar parche… / Aplicar parche…, y `patch crear` / `patch aplicar`.
 - Scripts compilados (fase 7): estructura completa del cuerpo (miembros con sus valores por
   defecto, valores iniciales, funciones y estados) y desensamblador de los 57 opcodes, verificados
   en los 3 690 scripts del juego, que se reserializan idénticos. El panel central muestra los

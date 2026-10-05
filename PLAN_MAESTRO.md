@@ -1,5 +1,59 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 8 implementada (2026-10-04)**, antes de la prueba en el juego (punto de control):
+>
+> - `export.py`: JSON por objeto, `manifest.json` y CSV de las `FloatTable`. Con el archivo
+>   real, 7 862 JSON y 65 CSV, unos 120 MB, en 17 s; la GUI exporta una instantánea en un hilo.
+> - `patches.py`: `create_patch` alinea las listas (`diffing.align`, extraído del comparador
+>   sin cambiar su comportamiento) y deriva operaciones.
+>   - Cada emparejamiento y cada origen de copia se prueba antes de usarse, y las inserciones se
+>     hacen antes de quitar, así que cualquier elemento original sirve de origen.
+>   - Si no hay un origen en la misma lista, se busca en todo el original un objeto igual o de la
+>     misma clase y campos, que pasa a la lista de fuentes.
+>   - El parche se reaplica sobre la base antes de escribirse.
+> - `apply_patch` usa `Document.run_operations`: si algo falla, deshace lo aplicado.
+> - Medido: el parche de las ediciones de las fases 5 a 7 (3 objetos, 4 operaciones) se crea en
+>   0,5 s y reaplicado da el mismo SHA. Un fuzz de 230 secuencias de operaciones al azar (200
+>   sintéticas y 30 sobre objetos reales) da siempre un parche que reproduce el archivo.
+> - 211 tests. **Desviación:** en el JSON del parche las etiquetas legibles incluyen nombres de
+>   campo (p. ej. `Slots[2].SlotID`); son rutas, no contenido copiado del juego.
+>
+> **Decisiones de la fase 8 (2026-10-04)**, confirmadas por el usuario a partir del análisis de
+> los datos:
+>
+> - Las 7 862 rutas son únicas y válidas como nombres de archivo en Windows (sin choques al
+>   ignorar mayúsculas, un solo nivel de carpeta, 74 caracteres como máximo).
+> - El JSON de todos los BOD ocupa unos 62 MB y tarda unos 5 s: va en un hilo.
+> - Los 65 `FloatTable` son rectangulares: `Data` (filas `Row` de floats), `ColumnNames` y
+>   `RowNames`.
+>
+> Decisiones:
+>
+> - **El parche incluye cambios estructurales sin datos del juego:** operaciones que solo copian
+>   contenido del original (duplicar, quitar, mover, poner a nulo, rellenar con una copia de otro
+>   lugar del original o con una referencia). Si un cambio no se puede expresar así, se avisa y no
+>   se exporta.
+> - **Identificación por objeto:**
+>   - cada objeto lleva su ruta, (grupo, id) y el SHA-256 de su blob original y del resultado;
+>   - cada propiedad lleva su ruta de índices, su etiqueta legible y su valor anterior, y al
+>     aplicar se comprueban las tres;
+>   - se aplica sobre el original de Steam y sobre archivos donde solo difieren otros objetos,
+>     así que los parches se pueden combinar. Los objetos de los que se copia también se
+>     comprueban.
+> - **Sin importación:** JSON y CSV son solo de exportación; lo único que se reaplica son los
+>   parches.
+> - **Prueba en el juego:** con las ediciones ya probadas (duplicar `MoveStates[0]` y
+>   `JumpImpulse` 700 de la fase 5, y `PaperDoll_Idle` → `D_WScy_Combo04` de la fase 6). Se
+>   guarda a mano, se exporta el parche, se restaura, se reaplica y debe dar el mismo SHA.
+> - **Menores:**
+>   - nunca se exporta dentro de la carpeta del juego, y el destino debe estar vacío o ser una
+>     exportación anterior;
+>   - floats con el decimal más corto que da el mismo float32 (hexadecimal para NaN e infinitos);
+>   - nombres como texto, todo en UTF-8 y CSV con coma y punto decimal;
+>   - la versión no cambia (la decide el usuario en la fase 9).
+>
+> Criterios de «Hecho cuando» en la sección 7.
+>
 > **Fase 7 cerrada (2026-10-04)** con la prueba en el juego (detalle en
 > `research/PRUEBAS_EN_JUEGO.md`). El usuario cambió en `ui_core/pausemenu` el literal de
 > `Game.setPaused(true)` (`Funciones.onInit.0x004E`) a `false`. Informó de que, con el menú de
@@ -720,6 +774,27 @@ Si no se llega al 100 % con la vía estadística, se para y se pregunta (decisi�
   + valor). Sirve para reaplicar los cambios tras una restauración de Steam y para compartirlos
   sin distribuir el archivo del juego.
 - Opcional: importar desde JSON, en un formato reversible.
+
+**Hecho cuando** (fijado el 2026-10-04 con el usuario; sin importación):
+
+- Archivo → Exportar… y `export --salida DIR` escriben:
+  - un JSON por objeto con el árbol tipado y las referencias resueltas (ruta y nombre, además de
+    grupo e id), con los scripts como miembros, valores iniciales y funciones desensambladas;
+  - un `manifest.json` con la huella del archivo y el índice;
+  - un CSV por cada `FloatTable`, con nombres de fila y de columna;
+
+  todo en un hilo con progreso, nunca dentro de la carpeta del juego;
+- Archivo → Exportar parche… y `patch crear` escriben un `.d2svpatch.json` relativo al original:
+  valores (también cadenas nuevas, referencias y literales de scripts) y cambios estructurales
+  sin datos del juego. Antes de escribirlo se reaplica sobre la base y debe dar el mismo SHA;
+- Archivo → Aplicar parche… lo aplica como ediciones pendientes que se pueden deshacer, y
+  `patch aplicar` lo aplica a un archivo nuevo. Se rechaza con un mensaje claro si un objeto,
+  una propiedad o un valor anterior no coinciden;
+- hay tests sintéticos de ida y vuelta para cada operación y con bases que no coinciden, y tests
+  con el archivo real: exportar todo y reaplicar ediciones de las fases 5 a 7 con el SHA exacto;
+- en el juego: guardar a mano, exportar el parche, restaurar, reaplicar, obtener el mismo SHA y
+  jugar (punto de control con el usuario);
+- están actualizados el plan, `CLAUDE.md`, `CHANGELOG.md` y el README.
 
 ### Fase 9 — Distribución
 

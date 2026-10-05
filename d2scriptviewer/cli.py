@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from . import __version__
+from . import __version__, export, patches
 from .document import Document, ObjectInfo
 from .errors import D2ScriptViewerError
 from .formats import bod, script
@@ -57,6 +57,23 @@ def build_parser() -> argparse.ArgumentParser:
     roundtrip.add_argument("--salida", type=Path, help="escribir aquí el archivo reconstruido")
 
     add_command("verify", "comprobar el archivo entero (apéndice A del plan)")
+
+    exporting = add_command("export", "exportar los objetos a JSON (y las FloatTable a CSV) con un manifest.json")
+    exporting.add_argument("--salida", type=Path, required=True, help="carpeta vacía o con una exportación anterior")
+    exporting.add_argument("--tipo", help="solo este tipo (número o nombre, p. ej. 15 o FloatTable)")
+    exporting.add_argument("--filtro", help="solo los objetos cuya ruta o nombre contiene este texto")
+
+    patching = subparsers.add_parser("patch", help="crear o aplicar un parche .d2svpatch.json",
+                                     description="Crear o aplicar un parche .d2svpatch.json")
+    patch_commands = patching.add_subparsers(dest="patch_command", required=True)
+    creating = patch_commands.add_parser("crear", help="crear un parche: diferencias entre la base y el archivo")
+    creating.add_argument("--archivo", type=Path, help=f"archivo modificado (por defecto, ${OBSP_ENV} o el del juego)")
+    creating.add_argument("--base", type=Path, help="original (por defecto, el *.original.obsp junto al archivo)")
+    creating.add_argument("--salida", type=Path, required=True, help="parche que se escribe (.d2svpatch.json)")
+    applying = patch_commands.add_parser("aplicar", help="aplicar un parche y escribir el resultado en otro archivo")
+    applying.add_argument("parche", type=Path, help="parche .d2svpatch.json")
+    applying.add_argument("--archivo", type=Path, help=f"archivo de partida (por defecto, ${OBSP_ENV} o el del juego)")
+    applying.add_argument("--salida", type=Path, required=True, help="archivo .obsp nuevo que se escribe")
 
     hashing = subparsers.add_parser(
         "hash",
@@ -244,6 +261,67 @@ def command_hash(texts: list[str]) -> int:
     return 0
 
 
+def _new_output(output: Path, *inputs: Path) -> None:
+    """Las salidas de la CLI son siempre archivos nuevos: nunca la entrada ni una copia del original."""
+    if any(output.resolve() == item.resolve() for item in inputs):
+        raise D2ScriptViewerError("--salida no puede ser uno de los archivos de entrada")
+    if output.name.casefold().endswith(".original.obsp"):
+        raise D2ScriptViewerError("No se escribe nunca encima de una copia *.original.obsp")
+    if output.exists():
+        raise D2ScriptViewerError(f"{output} ya existe; elige otra ruta")
+
+
+def command_export(document: Document, args: argparse.Namespace) -> int:
+    positions = [info.position for info in document.objects]
+    if args.tipo:
+        kind = _parse_kind(args.tipo)
+        positions = [p for p in positions if document.objects[p].entry.kind == kind]
+    if args.filtro:
+        needle = args.filtro.casefold()
+        positions = [p for p in positions if needle in document.objects[p].path.casefold()
+                     or needle in document.objects[p].name.casefold()]
+    result = export.export_document(document, args.salida, positions)
+    print(result.summary())
+    return 0
+
+
+def command_patch_create(path: Path, args: argparse.Namespace) -> int:
+    from .saving import original_copy_path
+
+    base_path = args.base or original_copy_path(path)
+    if not base_path.is_file():
+        raise D2ScriptViewerError(f"No existe la base {base_path}: indícala con --base")
+    _new_output(args.salida, path, base_path)
+    started = time.perf_counter()
+    patch = patches.create_patch(base_path.read_bytes(), Document.open(path))
+    patches.save_patch(patch, args.salida)
+    print(f"Base:      {base_path} ({_status_text(patch['base']['sha256'])})")  # type: ignore[index]
+    print(f"Parche:    {args.salida}: {patches.patch_summary(patch)}")
+    print(f"Comprobado: reaplicado sobre la base da {patch['resultado']['sha256']} "  # type: ignore[index]
+          f"({time.perf_counter() - started:.2f} s)")
+    return 0
+
+
+def command_patch_apply(path: Path, args: argparse.Namespace) -> int:
+    _new_output(args.salida, path, args.parche)
+    patch = patches.load_patch(args.parche)
+    document = Document.open(path)
+    patches.apply_patch(document, patch, args.parche.name)
+    data = document.current_data()
+    report = verify_data(data)
+    if not report.ok:
+        raise D2ScriptViewerError("El resultado no pasa verify; no se escribe")
+    args.salida.parent.mkdir(parents=True, exist_ok=True)
+    args.salida.write_bytes(data)
+    sha = hashlib.sha256(data).hexdigest().upper()
+    print(f"Aplicado:  {patches.patch_summary(patch)}")
+    print(f"Escrito:   {args.salida} ({len(data):,} bytes, SHA-256 {sha})")
+    expected = patch.get("resultado", {}).get("sha256")  # type: ignore[union-attr]
+    print("Resultado: idéntico al del parche" if sha == expected else
+          "Resultado: correcto por objeto; el archivo difiere del previsto en objetos que el parche no toca")
+    return 0
+
+
 def command_verify(path: Path) -> int:
     data = path.read_bytes()
     report = verify_data(data)
@@ -277,6 +355,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "hash":
             return command_hash(args.textos)
         path = _resolve_path(args.archivo)
+        if args.command == "patch":
+            if args.patch_command == "crear":
+                return command_patch_create(path, args)
+            return command_patch_apply(path, args)
         if args.command == "verify":
             return command_verify(path)
         document = Document.open(path)
@@ -288,6 +370,8 @@ def main(argv: list[str] | None = None) -> int:
             return command_show(document, args)
         if args.command == "disasm":
             return command_disasm(document, args)
+        if args.command == "export":
+            return command_export(document, args)
         if args.command == "roundtrip":
             return command_roundtrip(document, path, args.salida)
         parser.error(f"subcomando desconocido: {args.command}")

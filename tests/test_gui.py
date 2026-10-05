@@ -269,6 +269,30 @@ class EditingGuiTests(TempDirMixin, unittest.TestCase):
         self.app.undo()
         self.assertEqual(self.document.current_data(), fixtures.make_obsp())
 
+    def test_export_and_patch_round_trip(self) -> None:
+        alerts: list[str] = []
+        self.app.alert = lambda _title, message: alerts.append(message)
+        folder = self.folder / "exportado"
+        self.app.export_files(folder)
+        self.assertTrue(pump(self.app, lambda: not self.app.exporting))
+        self.assertTrue((folder / "manifest.json").is_file())
+        self.assertIn("Exportados 4 objetos y 1 tablas CSV", self.notes[-1])
+        self.type_into_editor("Health", "250")
+        patch_path = self.folder / "cambios.d2svpatch.json"
+        self.app.export_patch(patch_path)
+        self.assertTrue(pump(self.app, lambda: not self.app.exporting))
+        self.assertTrue(patch_path.is_file())
+        self.assertIn("1 objetos, 1 operaciones (1 valor)", self.notes[-1])
+        edited = self.document.current_data()
+        self.app.undo()
+        self.app.apply_patch_file(patch_path)
+        self.assertEqual(self.document.current_data(), edited)
+        self.assertIn("Parche aplicado", self.notes[-1])
+        self.assertEqual(alerts, [])
+        self.app.apply_patch_file(patch_path)  # el objeto ya tiene cambios pendientes
+        self.assertIn("cambios sin guardar", alerts[-1])
+        self.assertEqual(self.document.current_data(), edited)
+
     def test_identifier_fields_ask_first(self) -> None:
         self.answer = False
         self.type_into_editor("ItemID", "99")

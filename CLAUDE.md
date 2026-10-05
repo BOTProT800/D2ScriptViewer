@@ -28,8 +28,9 @@ al guardar) están al principio del plan. Fase 6 cerrada y validada en el juego:
 es un CRC-64 reflejado (deducido de los datos), los valores `0F` admiten cadenas nuevas con
 aviso, y el juego usa una cadena nueva para encontrar una animación del `.upak`. Fase 7
 (scripts compilados) cerrada y validada en el juego: estructura completa, desensamblador y
-parches de literales del mismo tamaño; el juego ejecuta un literal parcheado. Siguen las fases 8
-(exportación y parches) y 9 (distribución), en ese orden. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+parches de literales del mismo tamaño; el juego ejecuta un literal parcheado. Fase 8 (exportación
+JSON/CSV y parches `.d2svpatch.json`) implementada; falta la prueba en el juego. Después, la
+fase 9 (distribución). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -50,6 +51,9 @@ python -m d2scriptviewer roundtrip --salida build\roundtrip.obsp
 python -m d2scriptviewer verify                             # comprobaciones del apéndice A
 python -m d2scriptviewer hash Death death/death_desc        # hash e idObjeto, sin archivo
 python -m d2scriptviewer disasm death/death                 # miembros y código de un script
+python -m d2scriptviewer export --salida build\export        # JSON por objeto, manifest y CSV
+python -m d2scriptviewer patch crear --salida build\x.d2svpatch.json   # base: *.original.obsp o --base
+python -m d2scriptviewer patch aplicar build\x.d2svpatch.json --salida build\y.obsp
 python -m unittest discover -s tests -v                     # todos los tests
 python -m unittest tests.<modulo>.<Clase>.<test>            # un solo test
 $env:D2SV_OBSP = 'C:\ruta\a\scripts.obsp'                   # archivo real para CLI y tests
@@ -90,6 +94,14 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   `fail_at` permite a los tests simular fallos en cada paso.
 - `references.py` (índice `FC`, diccionario y `SlotIndex` de huecos en una pasada) y `search.py`
   (búsqueda en hilo).
+- `export.py` (fase 8): JSON por objeto con referencias resueltas, `manifest.json` y CSV de las
+  `FloatTable`; nunca dentro de la carpeta del juego ni en una carpeta ocupada por otra cosa.
+- `patches.py` (fase 8): `create_patch` deriva, comparando la base con el documento, operaciones
+  que solo copian contenido del original (`valor`, `quitar`, `mover`, `insertar`, `nulo`,
+  `copiar`, `referencia`) y se autoverifica reaplicándose; `apply_patch` comprueba objeto (ruta,
+  identidad, SHA), etiqueta, valor anterior y huellas, y aplica todo como un paso de deshacer
+  con `Document.run_operations` (si algo falla, no queda nada aplicado).
+- `diffing.align`: alineamiento de listas por huellas, compartido por el comparador y los parches.
 - `wording.py`: plurales («1 objeto», «2 objetos»).
 - `verification.py`: las comprobaciones completas que usa `verify`.
 - `gui/`: `app.py` (ventana, hilos, navegación, edición), `object_tree.py`, `property_view.py`,
