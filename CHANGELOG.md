@@ -7,6 +7,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ## [Unreleased]
 
+### Added
+
+- `GUIA_MODDER.md`: atajos de teclado de cada panel y ventana, cómo se escriben los valores,
+  qué se ha modificado con éxito en el juego, dónde buscar el resto y qué no conviene tocar.
+
 ## [1.0.0] - 2026-10-04
 
 Primer release.

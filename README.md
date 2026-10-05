@@ -8,6 +8,9 @@ nuevas, ver y parchear los scripts compilados, exportar a JSON y CSV, y guardar 
 formato `.obsp` con una copia intacta del original. Todo se ha probado en el juego. El plan y su
 historial están en [PLAN_MAESTRO.md](PLAN_MAESTRO.md).
 
+Los atajos de teclado y lo que se suele modificar están en la
+[guía del modder](GUIA_MODDER.md).
+
 ## Antes de empezar
 
 - **La primera vez que guardas** encima de `scripts.obsp` se crea `scripts.original.obsp`: una

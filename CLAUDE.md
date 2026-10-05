@@ -126,6 +126,8 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
 - `tests/fixtures.py`: OBSP sintético con los 11 tags y hashes reales; `tests/support.py`: archivo real;
   `tests/test_gui.py`: humo de la GUI (se omite sin Tk).
 - `research/FORMATO.md`: hallazgos de formato fuera del apéndice A.
+- `GUIA_MODDER.md`: atajos de teclado y qué se suele modificar. Si cambias un atajo, un menú o
+  una prueba en el juego, actualízala en el mismo cambio.
 
 Solo biblioteca estándar, sin dependencias externas. La CI (Windows, Python 3.10–3.13)
 lo comprueba importando los módulos sin instalar nada. Los tests que necesitan el
