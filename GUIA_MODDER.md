@@ -120,16 +120,33 @@ Los nombres distinguen mayúsculas: `D_Jump` y `d_jump` son nombres distintos pa
 
 ## Parte 2 — Qué se suele modificar
 
-### Antes de empezar: cómo trabajar
+### Antes de empezar: copia tus partidas
 
-1. Cierra el juego (con él abierto no se puede guardar).
+**Haz una copia de tus partidas guardadas antes de probar cambios**, y sobre todo antes de
+probar límites (valores extremos, listas duplicadas o vaciadas, scripts parcheados). Si el juego
+guarda la partida mientras un cambio lo tiene en mal estado, esa partida puede quedar dañada.
+
+- La herramienta solo protege `scripts.obsp`: `scripts.original.obsp`, las copias de
+  `.d2sv_backups\` y Restaurar original… devuelven el archivo de scripts, **no tus partidas**.
+  Una partida dañada no se arregla restaurando el original.
+- Copia la carpeta de partidas entera a otro sitio, y repite la copia cada vez que llegues a un
+  punto que no quieras perder.
+- Si tienes la nube de Steam activada para el juego, una partida dañada puede subirse y
+  sustituir la que estaba en la nube. Mantén tu propia copia fuera de la carpeta del juego.
+- Para probar, mejor una partida nueva o una que no te importe perder.
+
+### Cómo trabajar
+
+1. Copia tus partidas (ver arriba) y cierra el juego (con él abierto no se puede guardar).
 2. Cambia **una sola cosa**, o unas pocas relacionadas.
 3. Ctrl+P para revisar los cambios pendientes y Ctrl+S para guardar. La primera vez se crea
    `scripts.original.obsp`.
-4. Prueba en el juego. Si no ves efecto, prueba también con una partida nueva: es posible que
-   la partida guarde algunos valores y conserve los antiguos (**hipótesis**, no comprobado).
+4. Prueba en el juego, en una partida de prueba. Si no ves efecto, prueba también con una
+   partida nueva: es posible que la partida guarde algunos valores y conserve los antiguos
+   (**hipótesis**, no comprobado).
 5. Cuando funcione, Archivo → Exportar parche…, para no perderlo si Steam restaura el archivo.
-6. Para volver al original: Archivo → Restaurar original…
+6. Para volver al original: Archivo → Restaurar original… Si una partida quedó mal, sustitúyela
+   por tu copia.
 
 ### Lo que ya está probado en el juego
 
@@ -207,6 +224,6 @@ Categorías del archivo (columna «Tipo» de la lista de objetos y filtro **Tipo
 - **Referencias sin destino.** Tampoco se puede guardar si una referencia apunta a un objeto que
   no existe.
 - **Valores extremos.** Multiplicar un valor por 2 se nota y es fácil de deshacer; multiplicarlo
-  por 1 000 puede romper la física o la partida.
+  por 1 000 puede romper la física o la partida. Pruébalos solo con tus partidas copiadas.
 - **Cosas que la herramienta no permite** (y no hace falta intentar): renombrar o crear objetos,
   cambiar nombres de campo o de clase, o cambiar el tamaño del código de un script.
