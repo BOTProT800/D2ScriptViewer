@@ -1,5 +1,27 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 10 abierta (2026-10-06): búsqueda dentro del objeto.** El usuario pidió buscar por tipo
+> y por valor en el panel de propiedades. Así se llega a filas como los siete `op_3A NumSlots`
+> de `death/death` sin desplegar el árbol a mano. Decisiones del usuario:
+>
+> - **Columnas:** un campo por columna (Nombre, Tipo y Valor), todos opcionales y combinados
+>   con «y».
+> - **Atajos:** Ctrl+F pasa a ser la búsqueda en el objeto, y Ctrl+Mayús+F la búsqueda global. La
+>   1.0.0 no está publicada, así que el cambio no rompe costumbres.
+> - **Resultados:** de uno en uno, con siguiente, anterior y contador. El árbol es la única vista.
+> - **Alcance:** solo el objeto abierto. Ampliar la búsqueda global al código de los scripts
+>   queda para otra fase.
+>
+> Medido sobre la copia de `D2SV_OBSP`:
+>
+> - el objeto mayor (`base/itemfoleytable`, 26 040 filas) se recorre y compara en 36–57 ms, así
+>   que se busca en el hilo de Tk, sin índices ni hilos;
+> - `death/death` tiene 7 592 filas, y `op_3A` + `NumSlots` da exactamente 7;
+> - hay 13 tipos en los BOD y 71 en los scripts;
+> - 12 nodos tienen más de 500 hijos y se muestran en tramos.
+>
+> Criterios en la fase 10 de la sección 7.
+>
 > **Fase 9 cerrada (2026-10-04): versión 1.0.0 preparada para publicar.** Con ella se completan
 > las fases 0 a 9.
 >
@@ -883,6 +905,57 @@ Si no se llega al 100 % con la vía estadística, se para y se pregunta (decisi�
 
 - Ejecutable con PyInstaller y workflow de release como el de Darkstractor.
 - README con guía de uso y advertencias (copia del original, juego cerrado, Steam).
+
+### Fase 10 — Búsqueda dentro del objeto
+
+Decisiones del 2026-10-06 en la nota del principio.
+
+- **Barra** bajo el título del objeto, en el panel de propiedades: campos `Nombre`, `Tipo` y
+  `Valor`, botones de anterior y siguiente (‹ ›) y un contador («3 de 7»).
+  - Nombre y Valor: texto contenido, sin distinguir mayúsculas, tal como se ve en la columna.
+    En una referencia, `→` y el destino.
+  - Tipo: desplegable con los tipos del objeto abierto y «(cualquiera)». Se puede escribir.
+    Coincidencia exacta, sin distinguir mayúsculas.
+  - Un campo vacío no filtra. Con los tres vacíos no hay resultados.
+- **Teclas:**
+  - Ctrl+F lleva el foco a la barra; Ctrl+Mayús+F abre la búsqueda global.
+  - En la barra, Intro o F3 va al siguiente y Mayús+Intro o Mayús+F3 al anterior. Al llegar al
+    final vuelve al principio.
+  - Escape devuelve el foco al árbol. F3 y Mayús+F3 también funcionan desde el árbol.
+- **Ir a un resultado** abre los nodos y tramos necesarios, selecciona la fila y la deja a la
+  vista. La pista y la edición (F2) siguen igual.
+- **Recalcular:**
+  - al escribir, tras 200 ms sin teclear;
+  - al cambiar de objeto: los criterios se conservan y la selección no se mueve;
+  - tras editar, deshacer, rehacer o cambiar la estructura.
+- **Núcleo sin Tk:** `search.find_in_tree` devuelve las rutas en el orden de las filas. La GUI
+  solo la llama y navega con `reveal`.
+
+**Hecho cuando:**
+
+- la barra, las teclas y el recálculo funcionan como se describe arriba;
+- hay tests unitarios con los fixtures:
+  - cada campo por separado y combinados;
+  - mayúsculas y referencias buscadas por su destino;
+  - el orden de las filas;
+  - una lista de más de 500 elementos;
+  - criterios vacíos y sin resultados;
+- hay tests de la GUI:
+  - contador, y anterior/siguiente con vuelta al principio;
+  - un resultado dentro de un tramo;
+  - recálculo tras editar y al cambiar de objeto;
+  - F2 sobre un resultado;
+  - Ctrl+Z en un campo de la barra no deshace el archivo;
+  - Ctrl+Mayús+F abre la búsqueda global;
+- hay tests con el archivo real:
+  - en `death/death`, `op_3A` + `NumSlots` da las 7 rutas de `Funciones.onInit` (`0x0770` a
+    `0x0A4A`), y el `int32` siguiente vale 21, 21, 21, 22, 22, 22 y 21;
+  - el objeto mayor se busca en menos de 200 ms;
+- no hace falta prueba en el juego: no cambia el formato ni el guardado;
+- están actualizados:
+  - el plan, sección 6 incluida;
+  - `CLAUDE.md`, `CHANGELOG.md` (`[Unreleased]`) y el README;
+  - `GUIA_MODDER.md`: atajos, y el ejemplo del inventario marcado como no probado en el juego.
 
 ## 8. Estrategia de pruebas
 
