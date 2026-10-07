@@ -1,5 +1,57 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 10 implementada (2026-10-07): búsqueda dentro del objeto.** Falta pasar sus dos tests
+> con el archivo real: se escribieron en un contenedor Linux sin `scripts.obsp` y quedaron
+> omitidos. Se cierra cuando pasen en Windows con `D2SV_OBSP`.
+>
+> - `search.find_in_tree` devuelve las rutas en el orden de las filas, que es el orden
+>   lexicográfico de las rutas. Comparte con el panel el texto de la columna Valor
+>   (`row_value_text`, con `→` y el destino en las referencias). `tree_types` da los tipos del
+>   objeto.
+> - El panel de propiedades lleva la barra bajo el título. Siguiente y anterior se buscan con
+>   `bisect` desde la fila seleccionada, y un tramo cuenta como su primer elemento. Ir a un
+>   resultado usa `reveal`, y `show_bod` y `set_edited` recalculan sin mover la selección.
+> - Ctrl+F lleva el foco a la barra, y Ctrl+Mayús+F (`<Control-F>`) abre la búsqueda global. El
+>   menú Buscar tiene las dos entradas.
+> - Medido aquí con un árbol sintético de 31 901 filas: entre 25 y 65 ms por búsqueda, y 42 ms
+>   para listar sus tipos.
+>
+> Detalles decididos al implementar, dentro de lo acordado el 2026-10-06:
+>
+> - Al escribir, si la fila seleccionada sigue siendo un resultado, no se mueve. Si no lo es, se
+>   va al siguiente resultado desde ella.
+> - El contador dice «3 de 7» sobre un resultado, «7 resultados» si la fila seleccionada no es
+>   uno, «Sin resultados» si no hay ninguno, y nada si los campos están vacíos.
+> - Ctrl+F vuelve al último campo usado, con su texto seleccionado, y cancela un editor abierto.
+>   En otra ventana (la búsqueda global o un diálogo) no salta a la principal.
+> - F2 en la barra edita la fila seleccionada, como F2 en el árbol.
+> - Los tipos del desplegable se calculan al abrirlo. Los botones ‹ › usan un estilo compacto
+>   (`Small.TButton`) para que los campos quepan en el ancho por defecto del panel.
+>
+> Criterios de «Hecho cuando»:
+>
+> 1. La barra, las teclas y el recálculo funcionan como se describe: sí. Además de los tests, se
+>    probaron con teclas reales y la ventana visible en Xvfb: Ctrl+F, escribir, Intro, Mayús+Intro,
+>    F3, Escape, Mayús+F3 en el árbol, Ctrl+Z en la barra y en el árbol, y Ctrl+Mayús+F.
+> 2. Tests unitarios con los fixtures (`TreeSearchTests`): sí. Cubren cada campo, las
+>    combinaciones, las mayúsculas, las referencias por su destino, el orden, una lista de 1 200
+>    elementos, los criterios vacíos y la búsqueda sin resultados, más los tipos y un script.
+> 3. Tests de la GUI (`ObjectSearchGuiTests`): sí. Cubren el contador, anterior y siguiente con
+>    vuelta al principio, un resultado dentro de un tramo, el recálculo tras editar, deshacer y
+>    cambiar la estructura y al cambiar de objeto, F2 sobre un resultado, Ctrl+Z en los tres
+>    campos y Ctrl+Mayús+F. Con la ventana oculta, Tk descarta las teclas sintéticas, así que
+>    los tests invocan el callback de cada enlace (`invoke_binding`).
+> 4. Tests con el archivo real (`RealTreeSearchTests`): escritos, sin ejecutar. Comprueban que
+>    `death/death` da las 7 rutas de `0x0770` a `0x0A4A`, con 21, 21, 21, 22, 22, 22 y 21 en la
+>    fila siguiente, y que `base/itemfoleytable` se busca en menos de 200 ms.
+> 5. Prueba en el juego: no hace falta.
+> 6. Plan (sección 6 incluida), `CLAUDE.md`, `CHANGELOG.md`, README y `GUIA_MODDER.md` (atajos,
+>    y el inventario como ejemplo no probado en el juego): sí.
+>
+> 234 tests. Se ejecutaron en Linux con Python 3.12.3 y Tk 8.6.14 bajo Xvfb, como usuario no root:
+> 30 omitidos (los del archivo real) y código de salida 0. Como root fallan dos tests de
+> `test_saving` porque root escribe en archivos de solo lectura; no afecta a Windows.
+>
 > **Fase 10 abierta (2026-10-06): búsqueda dentro del objeto.** El usuario pidió buscar por tipo
 > y por valor en el panel de propiedades. Así se llega a filas como los siete `op_3A NumSlots`
 > de `death/death` sin desplegar el árbol a mano. Decisiones del usuario:
@@ -660,14 +712,14 @@ D2ScriptViewer/
 │  ├─ document.py          # archivo abierto: objetos, caché, modificados, undo/redo
 │  ├─ edits.py             # comandos de edición y validación
 │  ├─ references.py        # índice inverso de referencias FC ("usado por")
-│  ├─ search.py            # búsqueda en segundo plano por ruta/nombre/clase/valor
+│  ├─ search.py            # búsqueda global en segundo plano y dentro del objeto (fase 10)
 │  ├─ saving.py            # pipeline de guardado, copia del original, restaurar
 │  ├─ settings.py          # %APPDATA%\D2ScriptViewer\config.json
 │  ├─ cli.py               # info, list, show, roundtrip, verify (export más adelante)
 │  └─ gui/
 │     ├─ app.py            # ventana, tema, menús, atajos, barra de estado
 │     ├─ object_tree.py    # panel de objetos
-│     ├─ property_view.py  # árbol de propiedades y editores
+│     ├─ property_view.py  # árbol de propiedades, editores y barra de búsqueda
 │     ├─ details.py        # metadatos, hex, referencias
 │     └─ script_view.py    # símbolos y (más adelante) desensamblado
 ├─ tests/
@@ -711,12 +763,15 @@ Tres zonas, con el estilo visual de Darkstractor:
   por ruta. Filtros por tipo (Desc, AnimationList, SoundList, script, FloatTable…) y por clase,
   y buscador. Los objetos modificados llevan una marca.
 - **Propiedades (centro).** `ttk.Treeview` con columnas Nombre | Tipo | Valor, carga perezosa de
-  hijos y edición en línea con doble clic.
+  hijos y edición en línea con doble clic. Encima, una barra de búsqueda con un campo por columna
+  (fase 10): recorre los resultados de uno en uno, con contador.
 - **Detalles (derecha/abajo).** Ruta, nombre, clase, carpeta, grupo, id, tipo, offset y tamaño.
   Pestañas: Hex | Referencias ("apunta a" / "usado por") | Script.
 - **Barra de estado.** Estado del archivo (original / modificado), número de cambios pendientes y ruta.
 - **Acciones.** Abrir (Ctrl+O), Guardar (Ctrl+S), Guardar como, Deshacer/Rehacer (Ctrl+Z / Ctrl+Y),
-  Revertir objeto, Cambios pendientes, Restaurar original, Buscar (Ctrl+F) e Ir a referencia (doble clic).
+  Revertir objeto, Cambios pendientes, Restaurar original, Buscar en el objeto (Ctrl+F; F3 y
+  Mayús+F3 recorren los resultados), Buscar en todo el archivo (Ctrl+Mayús+F) e Ir a referencia
+  (doble clic).
 
 Editores por tipo de valor:
 
@@ -982,6 +1037,8 @@ Decisiones del 2026-10-06 en la nota del principio.
 ### GUI
 
 - Prueba de humo: crear la ventana, cargar un fixture, seleccionar un objeto, editar un valor y cerrar.
+- Las ventanas se prueban ocultas. Como Tk descarta las teclas sintéticas sin foco, los atajos se
+  prueban invocando el callback de su enlace (`invoke_binding` en `tests/test_gui.py`).
 
 ### En el juego (manual)
 

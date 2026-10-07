@@ -57,6 +57,8 @@ def configure_styles(root: tk.Misc) -> ttk.Style:
     style.map("Accent.TButton", background=[("active", "#9d72f8"), ("disabled", "#3d344f")])
     style.configure("TButton", font=("Segoe UI", 10), padding=(10, 5), background="#292f38", foreground="#eef0f5")
     style.map("TButton", background=[("active", "#343c48"), ("disabled", "#1f242b")], foreground=[("disabled", "#5b616b")])
+    # Botones compactos de la barra de búsqueda del objeto (‹ ›).
+    style.configure("Small.TButton", padding=(4, 1))
     style.configure("TEntry", fieldbackground=FIELD, foreground="#edf0f5", insertcolor="white", padding=5)
     style.configure("TCombobox", fieldbackground=FIELD, foreground="#edf0f5", padding=4, arrowcolor=TEXT)
     style.map(

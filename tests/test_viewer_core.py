@@ -1,19 +1,22 @@
 # SPDX-FileCopyrightText: 2026 BOTProT800
 # SPDX-License-Identifier: MIT
 
-"""Núcleo del visor sin interfaz: documento, índice de referencias, búsqueda y volcado hex."""
+"""Núcleo del visor sin interfaz: documento, índice de referencias, búsquedas y volcado hex."""
 
 from __future__ import annotations
 
 import threading
+import time
 import unittest
 
 from d2scriptviewer.binary import hex_dump
 from d2scriptviewer.document import Document
+from d2scriptviewer.formats import bod
 from d2scriptviewer.formats.hashes import name_hash
 from d2scriptviewer.references import Cancelled, Reference, ReferenceIndex, build_indexes, references_in
-from d2scriptviewer.search import SearchOptions, search
+from d2scriptviewer.search import ANY_TYPE, SearchOptions, find_in_tree, row_value_text, search, tree_types
 from tests import fixtures
+from tests.support import real_bytes, requires_real_file
 
 
 class DocumentTests(unittest.TestCase):
@@ -123,6 +126,135 @@ class SearchTests(unittest.TestCase):
         tree = self.document.bod(0)
         tree.root.fields[3].value.text = "cambiado"
         self.assertEqual(self.find("cambiado", metadata=False), [("death/death_desc", "valor", "Comment")])
+
+
+class TreeSearchTests(unittest.TestCase):
+    """Búsqueda dentro del objeto (fase 10): columnas Nombre, Tipo y Valor tal como se ven."""
+
+    def setUp(self) -> None:
+        self.document = Document.from_bytes(fixtures.make_obsp())
+        self.desc = self.document.bod(0)
+
+    def ref_label(self, identity: tuple[int, int]) -> str:
+        info = self.document.object_by_identity(identity)
+        return info.label() if info is not None else "(no existe)"
+
+    def find(self, tree: bod.BodDocument | None = None, **criteria: str) -> list[str]:
+        tree = tree or self.desc
+        return [bod.path_label(tree, path) for path in find_in_tree(tree, ref_label=self.ref_label, **criteria)]
+
+    def test_each_column(self) -> None:
+        self.assertEqual(self.find(name="crit"), ["Stats.Crit"])
+        self.assertEqual(self.find(name="id"), ["ItemID", "Slots[0].SlotID", "Slots[1].SlotID"])
+        self.assertEqual(self.find(type_name="bool"), ["Visible", "Script.Enabled"])
+        self.assertEqual(self.find(type_name="nombre"), ["Mesh", "Tags[0]", "Tags[1]", "Lookup[0].clave"])
+        self.assertEqual(self.find(value="death_mesh"), ["Mesh", "Tags[0]"])
+        # Valor como se ve en la columna: un par es «clave → valor» y una cadena sin hash va entre comillas.
+        self.assertEqual(self.find(value="'hola'"), ["Comment"])
+        self.assertEqual(self.find(value="1 → 'uno'"), ["Pairs[0]"])
+
+    def test_columns_combine_with_and(self) -> None:
+        self.assertEqual(self.find(type_name="nombre", value="fire"), ["Tags[1]"])
+        self.assertEqual(self.find(name="count", value="7"), ["Slots[1].Count"])
+        self.assertEqual(self.find(name="slotid", type_name="int32", value="2"), ["Slots[1].SlotID"])
+        self.assertEqual(self.find(name="health", type_name="float32"), [])
+
+    def test_case_and_type_is_exact(self) -> None:
+        self.assertEqual(self.find(name="HEALTH"), ["Health"])
+        self.assertEqual(self.find(value="HEALTH"), ["Lookup[0]", "Lookup[0].clave"])
+        self.assertEqual(self.find(type_name="FLOAT32"),
+                         ["Speed", "Stats.Crit", "Lookup[0].valor", "Color[0]", "Color[1]", "Color[2]"])
+        # El tipo no es texto contenido: «lista» no encuentra los «pares».
+        self.assertEqual(self.find(type_name="lista"), ["Tags", "Empty", "Slots"])
+        self.assertEqual(self.find(type_name="list"), [])
+
+    def test_references_by_their_target(self) -> None:
+        self.assertEqual(self.find(value="weaponbehavior_inst"), ["Behavior"])
+        self.assertEqual(self.find(value="→ scripts/"), ["Behavior"])
+        # Sin etiquetas de destino se ve la identidad, como en el volcado.
+        self.assertEqual(find_in_tree(self.desc, value="weaponbehavior_inst"), [])
+        node = bod.resolve(self.desc, find_in_tree(self.desc, type_name="referencia")[0])
+        self.assertEqual(row_value_text(node, self.ref_label), "→ scripts/weaponbehavior_inst")
+        self.assertEqual(row_value_text(node), bod.value_text(node))
+
+    def test_row_order(self) -> None:
+        paths = find_in_tree(self.desc, value="e")
+        self.assertGreater(len(paths), 5)
+        self.assertEqual(paths, sorted(paths))
+        found = set(paths)
+        walked = [path for path, _node in bod.walk(self.desc.root) if path in found]
+        self.assertEqual(paths, walked)
+        self.assertNotIn((), find_in_tree(self.desc, type_name="objeto"))  # la raíz no es una fila
+
+    def test_a_list_longer_than_a_chunk(self) -> None:
+        tree = fixtures.big_list_document()
+        self.assertEqual(find_in_tree(tree, name="[1100]"), [(0, 1100)])
+        self.assertEqual(find_in_tree(tree, value="1199"), [(0, 1199)])
+        every = find_in_tree(tree, type_name="int32")
+        self.assertEqual(every, [(0, index) for index in range(1200)])
+        self.assertEqual(self.find(tree, value="999"), ["Values[999]"])
+
+    def test_empty_criteria_and_no_results(self) -> None:
+        self.assertEqual(find_in_tree(self.desc), [])
+        self.assertEqual(find_in_tree(self.desc, name="  ", type_name=ANY_TYPE, value=""), [])
+        self.assertEqual(find_in_tree(self.desc, type_name=ANY_TYPE.upper()), [])
+        self.assertEqual(self.find(name="crit", type_name=ANY_TYPE), ["Stats.Crit"])
+        self.assertEqual(self.find(name="no-existe"), [])
+        self.assertEqual(self.find(type_name="op_3A"), [])
+
+    def test_types_of_the_object(self) -> None:
+        self.assertEqual(
+            tree_types(self.desc),
+            ["bool", "cadena", "float32", "int32", "lista", "mapa", "nombre", "nulo", "objeto", "par", "pares",
+             "referencia", "tupla"],
+        )
+        self.assertEqual(tree_types(fixtures.instance_document()), ["bool", "referencia"])
+
+    def test_scripts_are_searched_by_mnemonic_and_operand(self) -> None:
+        tree = self.document.bod(2)
+        self.assertIn("op_3A", tree_types(tree))
+        paths = find_in_tree(tree, type_name="op_3A", value="numslots")
+        self.assertEqual([bod.path_label(tree, path) for path in paths], ["Funciones.OnStart.0x0016"])
+        following = bod.resolve(tree, paths[0][:-1] + (paths[0][-1] + 1,))
+        self.assertEqual((bod.type_text(following), bod.value_text(following)), ("int32", "21"))
+
+
+@requires_real_file
+class RealTreeSearchTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.document = Document.from_bytes(real_bytes())
+
+    def ref_label(self, identity: tuple[int, int]) -> str:
+        info = self.document.object_by_identity(identity)
+        return info.label() if info is not None else "(no existe)"
+
+    def test_num_slots_in_death(self) -> None:
+        tree = self.document.bod(self.document.find("death/death")[0].position)
+        paths = find_in_tree(tree, type_name="op_3A", value="NumSlots", ref_label=self.ref_label)
+        labels = [bod.path_label(tree, path) for path in paths]
+        self.assertEqual(len(labels), 7, labels)
+        self.assertTrue(all(label.startswith("Funciones.onInit.0x") for label in labels), labels)
+        self.assertEqual((labels[0], labels[-1]), ("Funciones.onInit.0x0770", "Funciones.onInit.0x0A4A"))
+        following = [bod.resolve(tree, path[:-1] + (path[-1] + 1,)) for path in paths]
+        self.assertTrue(all(isinstance(node, bod.Int32) for node in following))
+        self.assertEqual([node.value for node in following], [21, 21, 21, 22, 22, 22, 21])
+
+    def test_largest_object_is_searched_fast(self) -> None:
+        largest = max(self.document.objects, key=lambda info: info.entry.size)
+        self.assertEqual(largest.path, "base/itemfoleytable")
+        tree = self.document.bod(largest.position)
+        self.assertGreater(sum(1 for _ in bod.walk(tree.root)), 26_000)  # unas 26 040 filas
+        for criteria in (
+            {"value": "no-existe-en-el-archivo"},
+            {"type_name": "referencia"},
+            {"name": "a", "type_name": "nombre", "value": "e"},
+            {"value": "→"},
+        ):
+            with self.subTest(**criteria):
+                started = time.perf_counter()
+                find_in_tree(tree, ref_label=self.ref_label, **criteria)
+                self.assertLess(time.perf_counter() - started, 0.2)
 
 
 class HexDumpTests(unittest.TestCase):

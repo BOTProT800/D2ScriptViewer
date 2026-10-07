@@ -1,13 +1,18 @@
 # SPDX-FileCopyrightText: 2026 BOTProT800
 # SPDX-License-Identifier: MIT
 
-"""Búsqueda global por ruta, nombre, carpeta, clase y valores.
+"""Búsqueda global por ruta, nombre, carpeta, clase y valores, y búsqueda dentro de un objeto.
 
-Pensada para correr en un hilo: comprueba ``cancel`` entre objetos y entrega los
-resultados por lotes con ``on_hits``. Para no decodificar los 4 172 BOD en cada
-búsqueda, primero mira si el texto (o los 4 bytes del número) aparece en el
-blob crudo; solo decodifica los candidatos. Los objetos ya decodificados (y
-quizá editados) se buscan directamente en su árbol.
+La global (:func:`search`) está pensada para correr en un hilo: comprueba
+``cancel`` entre objetos y entrega los resultados por lotes con ``on_hits``. Para
+no decodificar los 4 172 BOD en cada búsqueda, primero mira si el texto (o los 4
+bytes del número) aparece en el blob crudo; solo decodifica los candidatos. Los
+objetos ya decodificados (y quizá editados) se buscan directamente en su árbol.
+
+La de dentro del objeto (:func:`find_in_tree`, fase 10) compara las columnas
+Nombre, Tipo y Valor de las filas del panel de propiedades tal como se ven. El
+objeto mayor se recorre en unas decenas de milisegundos, así que corre en el
+hilo de la interfaz, sin índices.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from __future__ import annotations
 import math
 import threading
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Iterator
 
 from .binary import F32, I32, TEXT_ENCODING
 from .document import Document
@@ -23,6 +28,10 @@ from .errors import FormatError
 from .formats import bod
 
 DEFAULT_LIMIT = 2000
+#: Valor del campo Tipo que no filtra (la primera opción del desplegable).
+ANY_TYPE = "(cualquiera)"
+
+RefLabel = Callable[[tuple[int, int]], str]
 
 
 @dataclass(frozen=True)
@@ -184,3 +193,73 @@ def search(
             flush()
     flush()
     return hits, False
+
+
+# --- Búsqueda dentro del objeto (fase 10) ------------------------------------------------------
+
+
+def row_value_text(node: object, ref_label: RefLabel | None = None) -> str:
+    """Texto de la columna «Valor» del panel de propiedades; en una referencia, ``→`` y el destino."""
+    if ref_label is not None and isinstance(node, bod.ExternalRef):
+        return f"→ {ref_label(node.identity)}"
+    return bod.value_text(node)
+
+
+def _rows(root: object) -> Iterator[tuple[bod.Path, str, object]]:
+    """(ruta, etiqueta, nodo) de cada fila, en el orden del árbol y sin la raíz (que no es una fila)."""
+    stack: list[tuple[bod.Path, str, object]] = []
+
+    def push(path: bod.Path, node: object) -> None:
+        kids = bod.children(node)
+        for index in range(len(kids) - 1, -1, -1):
+            label, child = kids[index]
+            stack.append((path + (index,), label, child))
+
+    push((), root)
+    while stack:
+        path, label, node = stack.pop()
+        yield path, label, node
+        push(path, node)
+
+
+def tree_types(document: bod.BodDocument) -> list[str]:
+    """Los tipos de las filas del objeto (columna «Tipo»), sin repetir y en orden alfabético."""
+    return sorted({bod.type_text(node) for _path, _label, node in _rows(document.root)} - {""}, key=str.casefold)
+
+
+def is_empty_query(name: str, type_name: str, value: str) -> bool:
+    """Con los tres campos vacíos (o Tipo en «(cualquiera)») no hay búsqueda."""
+    kind = type_name.strip().casefold()
+    return not name.strip() and not value.strip() and kind in ("", ANY_TYPE.casefold())
+
+
+def find_in_tree(
+    document: bod.BodDocument,
+    name: str = "",
+    type_name: str = "",
+    value: str = "",
+    ref_label: RefLabel | None = None,
+) -> list[bod.Path]:
+    """Rutas de las filas que cumplen todos los campos no vacíos, en el orden de las filas.
+
+    Nombre y Valor buscan el texto contenido; Tipo, el tipo exacto. Ninguno
+    distingue mayúsculas. El orden de las filas es el lexicográfico de sus rutas,
+    así que el resultado sirve para buscar el siguiente con :mod:`bisect`.
+    """
+    if is_empty_query(name, type_name, value):
+        return []
+    name_needle = name.strip().casefold()
+    kind = type_name.strip().casefold()
+    if kind == ANY_TYPE.casefold():
+        kind = ""
+    value_needle = value.strip().casefold()
+    found = []
+    for path, label, node in _rows(document.root):
+        if name_needle and name_needle not in label.casefold():
+            continue
+        if kind and bod.type_text(node).casefold() != kind:
+            continue
+        if value_needle and value_needle not in row_value_text(node, ref_label).casefold():
+            continue
+        found.append(path)
+    return found

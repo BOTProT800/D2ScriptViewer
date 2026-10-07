@@ -32,8 +32,11 @@ parches de literales del mismo tamaño; el juego ejecuta un literal parcheado. F
 JSON/CSV y parches `.d2svpatch.json`) cerrada y validada en el juego: un parche reaplicado tras
 restaurar reproduce byte a byte el archivo guardado a mano. Fase 9 (distribución) cerrada:
 versión 1.0.0, ejecutable de Windows con PyInstaller 6.22.3 y workflow de release, preparados en
-local; el push, la visibilidad del repositorio y la etiqueta los decide el usuario. Todas las
-fases del plan (0 a 9) están cerradas. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+local; el push, la visibilidad del repositorio y la etiqueta los decide el usuario. Las fases 0
+a 9 están cerradas. Fase 10 (búsqueda dentro del objeto) implementada el 7 de octubre de 2026: una
+barra en el panel de propiedades con un campo por columna, Ctrl+F para el objeto y Ctrl+Mayús+F
+para la búsqueda global. Se cierra cuando pasen en Windows sus dos tests con el archivo real
+(`RealTreeSearchTests`). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -101,8 +104,11 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   comprobar que se puede escribir, copia del original, copia rotativa, `.tmp` + `fsync` +
   `os.replace` y relectura con SHA. `restore_original`, `file_status`, `cleanup_orphan_tmp`.
   `fail_at` permite a los tests simular fallos en cada paso.
-- `references.py` (índice `FC`, diccionario y `SlotIndex` de huecos en una pasada) y `search.py`
-  (búsqueda en hilo).
+- `references.py` (índice `FC`, diccionario y `SlotIndex` de huecos en una pasada).
+- `search.py`: `search`, la búsqueda global en un hilo, y `find_in_tree` (fase 10), la del
+  objeto abierto. `find_in_tree` compara Nombre, Tipo y Valor tal como se ven (`row_value_text`)
+  y devuelve las rutas en el orden de las filas, que es el lexicográfico. Corre en el hilo de
+  Tk: el objeto mayor tarda decenas de milisegundos.
 - `export.py` (fase 8): JSON por objeto con referencias resueltas, `manifest.json` y CSV de las
   `FloatTable`; nunca dentro de la carpeta del juego ni en una carpeta ocupada por otra cosa.
 - `patches.py` (fase 8): `create_patch` deriva, comparando la base con el documento, operaciones
@@ -118,13 +124,17 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   `--autoprueba`), `D2ScriptViewer.spec` la receta de PyInstaller (copia a `build\licencias` los
   textos de licencia de terceros y `VERSIONES.txt`) y `THIRD_PARTY_NOTICES.md` los explica.
   `.github/workflows/release.yml` publica la release con una etiqueta `v*`.
-- `gui/`: `app.py` (ventana, hilos, navegación, edición), `object_tree.py`, `property_view.py`,
+- `gui/`: `app.py` (ventana, hilos, navegación, edición), `object_tree.py`, `property_view.py`
+  (árbol perezoso con tramos de 500, y la barra de búsqueda del objeto: recalcula en `show_bod` y
+  `set_edited` sin mover la selección y navega con `reveal`),
   `editors.py` (editor en la celda, selector de referencias y `FillNullDialog`), `pending_view.py`, `details.py`,
   `script_view.py`, `search_view.py`, `theme.py`. Los hilos solo encolan mensajes;
   `_poll_messages` los atiende en el hilo de Tk. Las confirmaciones y avisos pasan por `app.ask`,
   `app.ask_save`, `app.inform` y `app.alert`, que los tests sustituyen.
 - `tests/fixtures.py`: OBSP sintético con los 11 tags y hashes reales; `tests/support.py`: archivo real;
-  `tests/test_gui.py`: humo de la GUI (se omite sin Tk).
+  `tests/test_gui.py`: humo de la GUI (se omite sin Tk). Las ventanas van ocultas y Tk descarta
+  ahí las teclas sintéticas, así que los atajos se prueban con `invoke_binding`, que llama al
+  callback del enlace.
 - `research/FORMATO.md`: hallazgos de formato fuera del apéndice A.
 - `GUIA_MODDER.md`: atajos de teclado y qué se suele modificar. Si cambias un atajo, un menú o
   una prueba en el juego, actualízala en el mismo cambio.

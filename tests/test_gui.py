@@ -9,12 +9,14 @@ Se omiten si Tk no puede abrir una ventana (por ejemplo, sin escritorio).
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 import tkinter as tk
 import unittest
 
 from d2scriptviewer.document import Document
 from d2scriptviewer.formats import bod
+from d2scriptviewer.search import ANY_TYPE
 from d2scriptviewer.formats.hashes import name_hash
 from tests import fixtures
 from tests.support import REAL_OBSP, TempDirMixin, requires_real_file
@@ -42,6 +44,20 @@ def pump(app: tk.Tk, condition, timeout: float = 15.0) -> bool:
             return True
         time.sleep(0.005)
     return False
+
+
+def invoke_binding(widget: tk.Misc, sequence: str, target: tk.Misc | None = None, *, everywhere: bool = False) -> object:
+    """Llama al callback enlazado a ``sequence`` como si el evento llegara a ``target``.
+
+    Con la ventana oculta, Tk descarta las teclas sintéticas (no hay foco), así que se
+    invoca el comando que tkinter registró para el enlace, con ``%W`` apuntando a ``target``.
+    """
+    script = widget.bind_all(sequence) if everywhere else widget.bind(sequence)
+    match = re.search(r"\[(\S+) %#", script)
+    assert match is not None, f"{sequence} no está enlazado"
+    fields = ["0"] * len(widget._subst_format)
+    fields[widget._subst_format.index("%W")] = str(target or widget)
+    return widget.tk.call(match.group(1), *fields)
 
 
 @requires_tk
@@ -576,6 +592,209 @@ class StructureGuiTests(TempDirMixin, unittest.TestCase):
         window._revert()
         self.assertEqual(self.document.change_count, 0)
         self.assertEqual(self.rows("Tags"), ["[0]", "[1]"])
+
+
+@requires_tk
+class ObjectSearchGuiTests(unittest.TestCase):
+    """La barra de búsqueda del panel de propiedades (fase 10)."""
+
+    def setUp(self) -> None:
+        from d2scriptviewer.gui.app import ViewerApp
+
+        self.app = ViewerApp(auto_open=False, persist_settings=False)
+        self.app.withdraw()
+        self.addCleanup(self.app.destroy)
+        self.app.ask = lambda _title, _message, **_options: True
+        self.app.inform = lambda _title, _message: None
+        self.document = Document.from_bytes(fixtures.make_obsp())
+        self.app.set_document(self.document)
+        self.assertTrue(pump(self.app, lambda: self.app.indexes is not None))
+        self.desc = self.document.find("death/death_desc")[0].position
+        self.app.navigate(self.desc)
+        self.view = self.app.property_view
+
+    def path(self, label: str, position: int | None = None) -> tuple:
+        tree = self.view.document if position is None else self.document.bod(position)
+        return next(path for path, _node in bod.walk(tree.root) if bod.path_label(tree, path) == label)
+
+    def search(self, name: str = "", type_name: str = ANY_TYPE, value: str = "") -> None:
+        self.view.search_name_var.set(name)
+        self.view.search_type_var.set(type_name)
+        self.view.search_value_var.set(value)
+        self.view.run_search(move=True)  # lo que hace el temporizador tras 200 ms sin teclear
+
+    def selected_label(self) -> str | None:
+        selected = self.view.selected()
+        return bod.path_label(self.view.document, selected[1]) if selected else None
+
+    def state(self) -> tuple[str | None, str]:
+        return self.selected_label(), self.view.search_count_var.get()
+
+    def test_typing_waits_and_goes_to_the_first_result(self) -> None:
+        self.assertEqual(self.view.search_count_var.get(), "")
+        self.view.search_name_var.set("cri")
+        self.view.search_name_var.set("crit")
+        self.assertEqual(self.view.search_results, [])  # todavía no: espera 200 ms sin teclear
+        self.assertTrue(pump(self.app, lambda: self.view.search_results != []))
+        self.assertEqual(self.state(), ("Stats.Crit", "1 de 1"))
+        self.search(name="no-existe")
+        self.assertEqual(self.state(), ("Stats.Crit", "Sin resultados"))
+        self.search()
+        self.assertEqual(self.view.search_count_var.get(), "")
+
+    def test_counter_next_previous_and_wrap(self) -> None:
+        self.search(type_name="float32")
+        self.assertEqual(self.state(), ("Speed", "1 de 6"))
+        for expected in ("Stats.Crit", "Lookup[0].valor", "Color[0]", "Color[1]"):
+            self.view.next_result()
+            self.assertEqual(self.selected_label(), expected)
+        self.view.search_next.invoke()
+        self.assertEqual(self.state(), ("Color[2]", "6 de 6"))
+        self.view.next_result()
+        self.assertEqual(self.state(), ("Speed", "1 de 6"))  # vuelta al principio
+        self.view.search_previous.invoke()
+        self.assertEqual(self.state(), ("Color[2]", "6 de 6"))
+        # Desde una fila que no es un resultado, se sigue a partir de ella.
+        self.view.reveal(self.path("Mesh"))
+        self.assertEqual(self.state(), ("Mesh", "6 resultados"))
+        self.view.next_result()
+        self.assertEqual(self.selected_label(), "Stats.Crit")
+        self.view.reveal(self.path("Mesh"))
+        self.view.previous_result()
+        self.assertEqual(self.selected_label(), "Speed")
+
+    def test_keys(self) -> None:
+        self.search(type_name="float32")
+        for field in self.view.search_fields:
+            with self.subTest(field=str(field)):
+                self.assertEqual(self.selected_label(), "Speed")
+                invoke_binding(field, "<Return>")
+                self.assertEqual(self.selected_label(), "Stats.Crit")
+                invoke_binding(field, "<F3>")
+                self.assertEqual(self.selected_label(), "Lookup[0].valor")
+                invoke_binding(field, "<Shift-Return>")
+                invoke_binding(field, "<Shift-F3>")
+                self.assertEqual(self.selected_label(), "Speed")
+        invoke_binding(self.view.tree, "<F3>")
+        self.assertEqual(self.selected_label(), "Stats.Crit")
+        invoke_binding(self.view.tree, "<Shift-F3>")
+        self.assertEqual(self.selected_label(), "Speed")
+        focused: list[str] = []
+        self.view.tree.focus_set = lambda: focused.append("árbol")  # type: ignore[method-assign]
+        invoke_binding(self.view.search_value, "<Escape>")
+        self.assertEqual(focused, ["árbol"])
+
+    def test_result_inside_a_chunk(self) -> None:
+        self.view.show_bod("grande", fixtures.big_list_document())
+        self.search(name="[1100]")
+        self.assertEqual(self.view.selected()[1], (0, 1100))
+        self.assertEqual(self.view.search_count_var.get(), "1 de 1")
+        chunk = self.view.tree.parent(self.view._iid_by_path[(0, 1100)])
+        self.assertEqual(self.view.tree.item(chunk, "text"), "[1000…1199]")
+        self.assertTrue(self.view.tree.item(chunk, "open"))
+        # Con otra búsqueda, la fila seleccionada sigue si es un resultado.
+        self.search(type_name="int32")
+        self.assertEqual(self.state(), ("Values[1100]", "1,101 de 1,200"))
+        # Desde la fila de un tramo cerrado, siguiente es su primer elemento y anterior el de antes.
+        chunks = self.view.tree.get_children(self.view._iid_by_path[(0,)])
+        self.view.tree.selection_set(chunks[1])
+        self.view.next_result()
+        self.assertEqual(self.state(), ("Values[500]", "501 de 1,200"))
+        self.view.tree.selection_set(chunks[1])
+        self.view.previous_result()
+        self.assertEqual(self.selected_label(), "Values[499]")
+
+    def test_recalculated_after_editing_undo_and_structure(self) -> None:
+        self.assertEqual(len(self.view.search_results), 0)
+        self.search(value="100")  # también el grupo 10001 de una referencia y de una clase de script
+        self.assertEqual(self.state(), ("Health", "1 de 3"))
+        self.search(name="health", value="100")
+        self.assertEqual(self.state(), ("Health", "1 de 1"))
+        self.view.begin_edit()
+        self.view.editor.var.set("250")
+        self.view.editor.commit()
+        self.assertEqual(self.state(), ("Health", "Sin resultados"))
+        self.app.undo()
+        self.assertEqual(self.state(), ("Health", "1 de 1"))
+        self.search(type_name="nombre")
+        self.assertEqual(self.state(), ("Mesh", "1 de 4"))
+        self.app.structure_action("duplicate", self.path("Tags[0]"))
+        self.assertEqual(self.state(), ("Tags[1]", "3 de 5"))
+        self.app.undo()
+        self.assertEqual(len(self.view.search_results), 4)
+        self.app.redo()
+        self.assertEqual(len(self.view.search_results), 5)
+
+    def test_changing_object_keeps_criteria_and_selection(self) -> None:
+        self.search(type_name="bool")
+        self.assertEqual(self.state(), ("Visible", "1 de 2"))
+        instance = self.document.find("scripts/weaponbehavior_inst")[0].position
+        self.app.navigate(instance)
+        pump(self.app, lambda: False, timeout=0.4)  # ningún temporizador pendiente mueve la selección
+        self.assertEqual(self.view.search_type_var.get(), "bool")
+        self.assertEqual(self.state(), (None, "1 resultado"))
+        self.view.next_result()
+        self.assertEqual(self.state(), ("Enabled", "1 de 1"))
+        # Al llegar con una ruta (desde la búsqueda global o el historial) el contador la sitúa.
+        self.app.navigate(self.desc, self.path("Script.Enabled", self.desc))
+        self.assertEqual(self.state(), ("Script.Enabled", "2 de 2"))
+        # Los tipos del desplegable son los del objeto abierto.
+        self.view._fill_type_choices()  # lo que hace el desplegable al abrirse
+        self.assertIn("referencia", self.view.search_type.cget("values"))
+        self.assertEqual(self.view.search_type.cget("values")[0], ANY_TYPE)
+
+    def test_f2_on_a_result(self) -> None:
+        self.search(name="speed")
+        self.assertEqual(self.selected_label(), "Speed")
+        invoke_binding(self.view.search_name, "<F2>")
+        self.assertTrue(self.view.editing)
+        self.assertEqual(self.view.editor.iid, self.view._iid_by_path[self.path("Speed")])
+        self.view.editor.var.set("3")
+        self.view.editor.commit()
+        self.assertEqual(self.view.tree.item(self.view._iid_by_path[self.path("Speed")], "values"), ("float32", "3"))
+        self.assertEqual(self.state(), ("Speed", "1 de 1"))
+        invoke_binding(self.view.tree, "<F2>")
+        self.assertTrue(self.view.editing)
+        # Ctrl+F con el editor abierto lo cancela y pasa a la barra.
+        invoke_binding(self.app, "<Control-f>", self.view.editor.widget, everywhere=True)
+        self.assertFalse(self.view.editing)
+        self.assertTrue(self.view.search_name.selection_present())
+        self.assertEqual(self.document.change_count, 1)
+
+    def test_ctrl_z_in_a_bar_field_does_not_undo(self) -> None:
+        self.search(name="health")
+        self.view.begin_edit()
+        self.view.editor.var.set("250")
+        self.view.editor.commit()
+        self.assertEqual(self.document.change_count, 1)
+        for field in self.view.search_fields:
+            for sequence in ("<Control-z>", "<Control-y>", "<Control-p>"):
+                invoke_binding(self.app, sequence, field, everywhere=True)
+            self.assertEqual(self.document.change_count, 1)
+            self.assertIsNone(self.app.pending_window)
+        invoke_binding(self.app, "<Control-z>", self.view.tree, everywhere=True)
+        self.assertEqual(self.document.change_count, 0)
+
+    def test_ctrl_f_and_ctrl_shift_f(self) -> None:
+        menu = self.app.nametowidget(self.app.menubar.entrycget("Buscar", "menu"))
+        self.assertEqual(
+            [(menu.entrycget(index, "label"), menu.entrycget(index, "accelerator")) for index in range(2)],
+            [("Buscar en el objeto", "Ctrl+F"), ("Buscar en todo el archivo…", "Ctrl+Mayús+F")],
+        )
+        calls: list[str] = []
+        self.view.focus_search = lambda: calls.append("barra")  # type: ignore[method-assign]
+        invoke_binding(self.app, "<Control-f>", self.view.tree, everywhere=True)
+        self.assertEqual(calls, ["barra"])
+        self.assertIsNone(self.app.search_window)
+        invoke_binding(self.app, "<Control-F>", self.view.tree, everywhere=True)
+        window = self.app.search_window
+        self.assertIsNotNone(window)
+        self.assertTrue(window.winfo_exists())
+        # Ctrl+F dentro de la búsqueda global no salta a la ventana principal.
+        invoke_binding(self.app, "<Control-f>", window, everywhere=True)
+        self.assertEqual(calls, ["barra"])
+        invoke_binding(self.app, "<Control-F>", self.view.search_value, everywhere=True)
+        self.assertIs(self.app.search_window, window)
 
 
 @requires_tk

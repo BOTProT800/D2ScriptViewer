@@ -148,7 +148,8 @@ class ViewerApp(tk.Tk):
         menubar.add_cascade(label="Editar", menu=self.edit_menu)
 
         search_menu = tk.Menu(menubar, tearoff=False)
-        search_menu.add_command(label="Buscar…", accelerator="Ctrl+F", command=self.open_search)
+        search_menu.add_command(label="Buscar en el objeto", accelerator="Ctrl+F", command=self.focus_object_search)
+        search_menu.add_command(label="Buscar en todo el archivo…", accelerator="Ctrl+Mayús+F", command=self.open_search)
         menubar.add_cascade(label="Buscar", menu=search_menu)
 
         go_menu = tk.Menu(menubar, tearoff=False)
@@ -165,7 +166,8 @@ class ViewerApp(tk.Tk):
         self.bind_all("<Control-o>", lambda _event: self.choose_file())
         self.bind_all("<Control-s>", lambda _event: self.save() or "break")
         self.bind_all("<Control-S>", lambda _event: self.save_as() or "break")
-        self.bind_all("<Control-f>", lambda _event: self.open_search())
+        self.bind_all("<Control-f>", self._on_find_key)
+        self.bind_all("<Control-F>", lambda _event: self.open_search() or "break")
         self.bind_all("<Alt-Left>", lambda _event: self.go_back())
         self.bind_all("<Alt-Right>", lambda _event: self.go_forward())
         for sequence, action in (
@@ -1142,6 +1144,18 @@ class ViewerApp(tk.Tk):
 
     # --- Búsqueda ------------------------------------------------------------------------
 
+    def _on_find_key(self, event: tk.Event) -> str | None:
+        # Ctrl+F en otra ventana (la búsqueda global, un diálogo) no salta a la principal.
+        widget = event.widget
+        if not isinstance(widget, tk.Misc) or widget.winfo_toplevel() is not self:
+            return None
+        self.focus_object_search()
+        return "break"
+
+    def focus_object_search(self) -> None:
+        """Ctrl+F: la barra de búsqueda del panel de propiedades (fase 10)."""
+        self.property_view.focus_search()
+
     def open_search(self) -> None:
         if self.document is None:
             return
@@ -1183,6 +1197,7 @@ class ViewerApp(tk.Tk):
         if self.search_window is not None and self.search_window.winfo_exists():
             self.search_window.close()
         self.property_view.cancel_edit()
+        self.property_view.cancel_pending()
         self.object_tree.cancel_pending()
         super().destroy()
 

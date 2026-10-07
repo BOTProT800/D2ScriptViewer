@@ -52,7 +52,13 @@ el archivo.
   destino; Alt+← y Alt+→ recorren el historial.
 - **Detalles** (derecha): metadatos, volcado hexadecimal, referencias ("apunta a" / "usado por")
   y símbolos de los scripts compilados.
-- **Buscar** (Ctrl+F): rutas, nombres, clases, valores (texto o número) y símbolos.
+- **Buscar en el objeto** (Ctrl+F): la barra sobre el árbol de propiedades tiene un campo por
+  columna, Nombre, Tipo y Valor. Busca en todo el objeto abierto, aunque los nodos estén
+  cerrados. Intro o F3 van al siguiente resultado y Mayús+Intro o Mayús+F3 al anterior, con un
+  contador («3 de 7»); Escape vuelve al árbol. Por ejemplo, en el script `death/death`, Tipo
+  `op_3A` y Valor `NumSlots` encuentran las 7 asignaciones de `NumSlots`.
+- **Buscar en todo el archivo** (Ctrl+Mayús+F): rutas, nombres, clases, valores (texto o número)
+  y símbolos.
 
 ### Editar
 

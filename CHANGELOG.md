@@ -9,10 +9,22 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ### Added
 
+- Búsqueda dentro del objeto (fase 10): una barra sobre el árbol de propiedades con un campo por
+  columna, Nombre, Tipo (desplegable con los tipos del objeto abierto) y Valor, combinados con
+  «y» y sin distinguir mayúsculas. Busca en todo el objeto, también en los nodos y tramos que no
+  están abiertos, y en una referencia busca por su destino. Los resultados se recorren de uno en
+  uno con Intro o F3 (Mayús para ir hacia atrás), con contador («3 de 7») y vuelta al principio.
+  Se recalcula al escribir, al cambiar de objeto y tras cada edición. Ejemplo: en `death/death`,
+  Tipo `op_3A` y Valor `NumSlots` dan las 7 asignaciones de `onInit`.
 - `GUIA_MODDER.md`: atajos de teclado de cada panel y ventana, cómo se escriben los valores,
   qué se ha modificado con éxito en el juego, dónde buscar el resto y qué no conviene tocar.
   Recomienda copiar las partidas guardadas antes de probar: la herramienta solo protege
-  `scripts.obsp`.
+  `scripts.obsp`. Incluye el ejemplo de los huecos del inventario, sin probar en el juego.
+
+### Changed
+
+- Ctrl+F lleva a la barra de búsqueda del objeto. La búsqueda en todo el archivo pasa a
+  Ctrl+Mayús+F (menú Buscar → Buscar en todo el archivo…).
 
 ## [1.0.0] - 2026-10-04
 

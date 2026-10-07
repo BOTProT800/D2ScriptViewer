@@ -133,6 +133,12 @@ def table_document() -> BodDocument:
     return BodDocument(4, 1, BodObject(None, native("FloatTable"), [F("Data", BodList(bod.MODE_VALUES, rows))]))
 
 
+def big_list_document(size: int = 1200) -> BodDocument:
+    """Un objeto con una lista de más de 500 elementos, que el panel de propiedades reparte en tramos."""
+    items = BodList(bod.MODE_VALUES, [Int32.of(value) for value in range(size)])
+    return BodDocument(4, 1, BodObject(None, native("Big"), [F("Values", items)]))
+
+
 SCRIPT_SYMBOLS = (
     "scripts/test", "test", "ScriptBase", "Health", "Label", "Speed", "Stats", "Damage",
     "Items", "Enabled", "OnStart", "Unused", "Active", "onEnter", "NumSlots", "getInventory",

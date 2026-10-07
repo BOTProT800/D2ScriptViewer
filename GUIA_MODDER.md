@@ -10,6 +10,8 @@ trabajar con la herramienta día a día.
   ([research/PRUEBAS_EN_JUEGO.md](research/PRUEBAS_EN_JUEGO.md)).
 - **Por explorar:** el tipo de objeto existe en el archivo, pero nadie ha comprobado qué hace
   cada campo; lo que se dice de él se deduce de los nombres.
+- **No probado en el juego:** se sabe dónde está el dato y la herramienta lo puede cambiar, pero
+  nadie ha comprobado en el juego qué pasa al cambiarlo.
 
 ## Parte 1 — Atajos de teclado
 
@@ -23,13 +25,14 @@ trabajar con la herramienta día a día.
 | Ctrl+Z | Deshacer |
 | Ctrl+Y | Rehacer |
 | Ctrl+P | Cambios pendientes (antes → después de cada propiedad) |
-| Ctrl+F | Buscar |
+| Ctrl+F | Buscar en el objeto abierto: lleva a la barra sobre las propiedades |
+| Ctrl+Mayús+F | Buscar en todo el archivo |
 | Alt+← | Atrás en el historial de navegación |
 | Alt+→ | Adelante en el historial de navegación |
 
-Ctrl+Z, Ctrl+Y y Ctrl+P no actúan mientras escribes en un campo de texto (un filtro, la celda
-que editas…): ahí las teclas son del propio campo. Sal del campo para deshacer cambios del
-archivo.
+Ctrl+Z, Ctrl+Y y Ctrl+P no actúan mientras escribes en un campo de texto (un filtro, la barra
+de búsqueda, la celda que editas…): ahí las teclas son del propio campo. Sal del campo para
+deshacer cambios del archivo.
 
 Los menús no tienen letras subrayadas. Las acciones sin atajo están en ellos: Archivo →
 Restaurar original…, Exportar a JSON y CSV…, Exportar parche…, Aplicar parche…, y Editar →
@@ -62,6 +65,7 @@ categoría del objeto.
 | Ctrl+D | Duplicar el elemento de lista o la entrada de mapa (la copia queda justo detrás) |
 | Supr | Eliminar el elemento o la entrada |
 | Alt+↑ / Alt+↓ | Subir o bajar el elemento dentro de su lista |
+| F3 / Mayús+F3 | Resultado siguiente o anterior de la búsqueda en el objeto |
 
 - Las teclas de estructura solo actúan sobre elementos de listas y entradas de mapas, y nunca
   en los scripts compilados. **Poner a nulo** y **Rellenar nulo con un objeto…** no tienen
@@ -70,6 +74,32 @@ categoría del objeto.
   de errores y muestra cómo quedará el valor.
 - **Copiar ruta de la propiedad** (clic derecho) da algo como `MoveStates[44].JumpImpulse`: es
   la forma más cómoda de anotar qué cambiaste.
+
+### Búsqueda en el objeto (barra sobre las propiedades)
+
+Tres campos, uno por columna del árbol: **Nombre**, **Tipo** y **Valor**. Buscan en todo el
+objeto abierto, también dentro de los nodos y tramos que no has desplegado.
+
+- **Nombre** y **Valor** buscan el texto que contienen, tal como se ve en la columna y sin
+  distinguir mayúsculas. En una referencia, el valor es `→` y el destino: `death_desc` encuentra
+  las referencias a `death/death_desc`.
+- **Tipo** es exacto (`int32`, `float32`, `nombre`, `referencia`, `op_3A`…). La lista (↓ o la
+  flecha) trae los tipos del objeto abierto; «(cualquiera)» no filtra.
+- Un campo vacío no filtra, y los que tienen texto se combinan con «y».
+- El contador dice «3 de 7» sobre un resultado, «7 resultados» si la fila seleccionada no es
+  uno, y «Sin resultados» si no hay ninguno.
+- Los campos se conservan al cambiar de objeto, y los resultados se recalculan tras editar,
+  deshacer o cambiar la estructura.
+
+| Tecla | Acción |
+|---|---|
+| Ctrl+F | Ir a la barra, al último campo usado y con su texto seleccionado (cancela la celda que editabas) |
+| Escribir | Tras una pausa breve, va al primer resultado a partir de la fila seleccionada |
+| Intro o F3 | Resultado siguiente; tras el último vuelve al primero |
+| Mayús+Intro o Mayús+F3 | Resultado anterior |
+| ‹ / › | Lo mismo con el ratón |
+| F2 | Editar la fila seleccionada, como en el árbol |
+| Escape | Volver al árbol (las flechas se mueven desde el resultado) |
 
 ### Editor en la celda
 
@@ -93,8 +123,8 @@ abre ese objeto. Alt+← vuelve al anterior.
 
 | Ventana | Tecla | Acción |
 |---|---|---|
-| Buscar | Intro en el campo de texto | Buscar |
-| Buscar | Intro o doble clic en un resultado | Ir al objeto y a la propiedad |
+| Buscar en todo el archivo (Ctrl+Mayús+F) | Intro en el campo de texto | Buscar |
+| Buscar en todo el archivo | Intro o doble clic en un resultado | Ir al objeto y a la propiedad |
 | Cambios pendientes | Intro o doble clic | Ir a la propiedad cambiada |
 | Cambios pendientes | Escape | Cerrar |
 | Cambiar referencia | Escribir | Filtrar por ruta o nombre (el filtro tiene el foco al abrir) |
@@ -172,6 +202,26 @@ Lo que enseñan esas pruebas:
 - **En los scripts** solo se cambian literales `int`, `float` y `bool` sin alterar tamaños. El
   número de argumentos de una llamada (el `int n` antes de la llamada) es de solo lectura.
 
+### No probado en el juego: los huecos del inventario
+
+Un ejemplo de cómo llegar a un dato con la búsqueda en el objeto. **No se ha probado en el
+juego**: se sabe dónde está el número y que la herramienta lo puede cambiar, no qué pasa al
+cambiarlo.
+
+1. Abre el script `death/death` (el filtro de la lista de objetos ayuda a encontrarlo).
+2. Ctrl+F. En **Tipo**, escribe o elige `op_3A`; en **Valor**, escribe `NumSlots`. El contador
+   dice «1 de 7».
+3. Son las siete filas `op_3A NumSlots` de `Funciones.onInit`, de `0x0770` a `0x0A4A`. Intro
+   las recorre.
+4. El número está en la fila de debajo de cada una (Escape y ↓): un `int32` que vale 21, 21, 21,
+   22, 22, 22 y 21. Es un literal del código, así que F2 lo cambia sin alterar el tamaño del
+   script.
+
+Por el nombre, cada uno sería el número de huecos de una parte del inventario. Qué parte es cada
+uno, si el juego acepta otros valores y si la interfaz los muestra está por comprobar. Si lo
+pruebas, copia antes tus partidas (ver arriba): lo que llevas en el inventario se guarda en la
+partida.
+
 ### Por explorar: dónde suele estar cada cosa
 
 Categorías del archivo (columna «Tipo» de la lista de objetos y filtro **Tipo**):
@@ -193,11 +243,17 @@ Categorías del archivo (columna «Tipo» de la lista de objetos y filtro **Tipo
 
 ### Cómo encontrar lo que quieres cambiar
 
-- **Por nombre de campo.** Ctrl+F, marca «Nombres de campo» y escribe un término en inglés del
-  concepto. `Jump` lleva a `JumpImpulse`; prueba otros que se te ocurran. Si no hay resultados,
-  no hay ningún campo con ese texto.
-- **Por el número que ves en el juego.** Ctrl+F con un número (`350`) encuentra los enteros y los
-  floats con ese valor exacto. Sirve para localizar un dato del que conoces el valor.
+- **Por nombre de campo.** Ctrl+Mayús+F, marca «Nombres de campo» y escribe un término en inglés
+  del concepto. `Jump` lleva a `JumpImpulse`; prueba otros que se te ocurran. Si no hay
+  resultados, no hay ningún campo con ese texto.
+- **Por el número que ves en el juego.** Ctrl+Mayús+F con un número (`350`) encuentra los
+  enteros y los floats con ese valor exacto. Sirve para localizar un dato del que conoces el
+  valor.
+- **Dentro de un objeto grande.** Ctrl+F y los campos Nombre, Tipo y Valor de la barra, en lugar
+  de desplegar el árbol a mano: Nombre `JumpImpulse` en `death/playercommon_movestates` recorre
+  las filas con ese nombre sin abrir los estados uno a uno. La barra busca el texto contenido
+  (Valor `350` también encuentra `3500`); para el valor exacto de un número, usa la búsqueda en
+  todo el archivo.
 - **Siguiendo referencias.** Desde el `Desc` de un personaje, las filas `→ …` llevan a sus listas
   de movimientos, animaciones, etc. (`death/death_desc` → `MoveStateListArray.MoveStateLists[0]`
   → `death/playercommon_movestates`). En Detalles → Referencias, «Usado por» dice quién apunta al
@@ -208,10 +264,12 @@ Categorías del archivo (columna «Tipo» de la lista de objetos y filtro **Tipo
   puedes buscar con cualquier editor, y cada `FloatTable` a un CSV que se abre en una hoja de
   cálculo. Es solo para leer: los cambios se hacen en la herramienta.
 - **Scripts.** El panel central muestra el código desensamblado de cada función; Detalles →
-  Script, los símbolos. Ctrl+F con «Valores y símbolos» encuentra los scripts que tienen el texto
-  entre sus símbolos (sus miembros, funciones y estados). Los nombres que solo aparecen dentro
-  del código, como el método `setPaused`, no salen en esa búsqueda: búscalos en la exportación
-  JSON, que incluye el código desensamblado, o con `python -m d2scriptviewer disasm ruta`.
+  Script, los símbolos. Ctrl+Mayús+F con «Valores y símbolos» encuentra los scripts que tienen el
+  texto entre sus símbolos (sus miembros, funciones y estados). Los nombres que solo aparecen
+  dentro del código, como el método `setPaused`, no salen en esa búsqueda. Con el script abierto,
+  la barra sí los encuentra (Ctrl+F, Valor `setPaused`). Para buscarlos en todos los scripts a la
+  vez, usa la exportación JSON, que incluye el código desensamblado, o
+  `python -m d2scriptviewer disasm ruta`.
 
 ### Qué no tocar (o tocar con cuidado)
 

@@ -10,21 +10,30 @@ Edición: doble clic o F2 abre un editor en la celda (Intro confirma, Escape
 cancela). En una referencia ``FC``, doble clic e Intro navegan al destino y F2
 abre el selector de objetos. La validación y el cambio los hace el núcleo a
 través de los callbacks que recibe el panel.
+
+Búsqueda en el objeto (fase 10): una barra bajo el título con un campo por
+columna (Nombre, Tipo y Valor). :func:`search.find_in_tree` da las rutas en el
+orden de las filas, que es el lexicográfico de las rutas, y el panel recorre los
+resultados de uno en uno con :meth:`reveal`.
 """
 
 from __future__ import annotations
 
 import tkinter as tk
+from bisect import bisect_left, bisect_right
 from tkinter import ttk
 from typing import Callable
 
-from .. import edits
+from .. import edits, search
 from ..formats import bod, script
+from ..wording import count as count_text
 from . import theme
 from .editors import InlineEditor
 
 CHUNK = 500
 _DUMMY = "dummy"
+#: Milisegundos sin teclear antes de recalcular la búsqueda.
+SEARCH_DELAY = 200
 
 RefLabel = Callable[[tuple[int, int]], str]
 #: (nodo, ruta, texto) → mensaje de error, o ``None`` si se aplicó o se descartó.
@@ -66,6 +75,11 @@ class PropertyView(ttk.Frame):
         self._items: dict[str, tuple] = {}
         self._iid_by_path: dict[tuple, str] = {}
         self._populated: set[str] = set()
+        #: Resultados de la búsqueda en el objeto, en el orden de las filas, y su posición.
+        self.search_results: list[tuple] = []
+        self._search_rank: dict[tuple, int] = {}
+        self._search_after: str | None = None
+        self._search_types: list[str] | None = None
 
         self.title_var = tk.StringVar(value="")
         self.hint_var = tk.StringVar(value="")
@@ -79,6 +93,7 @@ class PropertyView(ttk.Frame):
         )
         self.hint_label = ttk.Label(self, textvariable=self.hint_var, style="PanelMuted.TLabel", wraplength=600, justify="left")
         self.hint_label.pack(side="bottom", fill="x", pady=(6, 0))
+        self._build_search_bar()
 
         frame, self.tree = theme.scrolled(
             self,
@@ -99,7 +114,9 @@ class PropertyView(ttk.Frame):
         self.tree.tag_configure("message", foreground=theme.MUTED)
         self.tree.tag_configure("edited", foreground=theme.MODIFIED)
         self.tree.bind("<<TreeviewOpen>>", self._on_open)
-        self.tree.bind("<<TreeviewSelect>>", lambda _event: self._show_selection_hint())
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        self.tree.bind("<F3>", lambda _event: self.next_result() or "break")
+        self.tree.bind("<Shift-F3>", lambda _event: self.previous_result() or "break")
         self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Return>", self._on_return)
         self.tree.bind("<F2>", lambda _event: self.begin_edit() or "break")
@@ -114,6 +131,49 @@ class PropertyView(ttk.Frame):
             self.tree.bind(sequence, lambda _event, action=action: self._structure_key(action))
         self.bind("<Configure>", lambda event: self.hint_label.configure(wraplength=max(event.width - 30, 200)))
 
+    def _build_search_bar(self) -> None:
+        self.search_name_var = tk.StringVar()
+        self.search_type_var = tk.StringVar(value=search.ANY_TYPE)
+        self.search_value_var = tk.StringVar()
+        self.search_count_var = tk.StringVar(value="")
+        bar = ttk.Frame(self, style="Panel.TFrame")
+        bar.pack(fill="x", pady=(0, 6))
+        self.search_bar = bar
+        ttk.Label(bar, text="Nombre", style="PanelMuted.TLabel").grid(row=0, column=0, sticky="w")
+        self.search_name = ttk.Entry(bar, textvariable=self.search_name_var, width=8)
+        self.search_name.grid(row=0, column=1, sticky="ew", padx=(4, 8))
+        ttk.Label(bar, text="Tipo", style="PanelMuted.TLabel").grid(row=0, column=2, sticky="w")
+        self.search_type = ttk.Combobox(
+            bar, textvariable=self.search_type_var, values=(search.ANY_TYPE,), width=9, height=20,
+            postcommand=self._fill_type_choices,
+        )
+        self.search_type.grid(row=0, column=3, sticky="ew", padx=(4, 8))
+        ttk.Label(bar, text="Valor", style="PanelMuted.TLabel").grid(row=0, column=4, sticky="w")
+        self.search_value = ttk.Entry(bar, textvariable=self.search_value_var, width=8)
+        self.search_value.grid(row=0, column=5, sticky="ew", padx=(4, 8))
+        self.search_previous = ttk.Button(bar, text="‹", width=2, style="Small.TButton", command=self.previous_result)
+        self.search_previous.grid(row=0, column=6, sticky="ns")
+        self.search_next = ttk.Button(bar, text="›", width=2, style="Small.TButton", command=self.next_result)
+        self.search_next.grid(row=0, column=7, sticky="ns", padx=(2, 0))
+        ttk.Label(bar, textvariable=self.search_count_var, style="PanelMuted.TLabel", anchor="e").grid(
+            row=0, column=8, sticky="e", padx=(6, 0)
+        )
+        # Los campos ceden espacio antes que el resto, pero nunca por debajo de un mínimo legible.
+        for column, weight in ((1, 3), (3, 2), (5, 3)):
+            bar.columnconfigure(column, weight=weight, minsize=56)
+        self.search_fields = (self.search_name, self.search_type, self.search_value)
+        self._last_search_field: ttk.Entry = self.search_name
+        for field in self.search_fields:
+            for sequence in ("<Return>", "<KP_Enter>", "<F3>"):
+                field.bind(sequence, lambda _event: self.next_result() or "break")
+            for sequence in ("<Shift-Return>", "<Shift-KP_Enter>", "<Shift-F3>"):
+                field.bind(sequence, lambda _event: self.previous_result() or "break")
+            field.bind("<Escape>", lambda _event: self.tree.focus_set() or "break")
+            field.bind("<F2>", lambda _event: self.begin_edit() or "break")
+            field.bind("<FocusIn>", lambda _event, field=field: setattr(self, "_last_search_field", field))
+        for variable in (self.search_name_var, self.search_type_var, self.search_value_var):
+            variable.trace_add("write", lambda *_: self._schedule_search())
+
     # --- Contenido -----------------------------------------------------------------------
 
     def _reset(self, title: str) -> None:
@@ -124,12 +184,14 @@ class PropertyView(ttk.Frame):
         self._populated = set()
         self.document = None
         self.edited_paths = set()
+        self._search_types = None
         self.title_var.set(title)
         self.set_hint("")
 
     def show_message(self, title: str, message: str) -> None:
         self._reset(title)
         self.tree.insert("", "end", text=message, tags=("message",))
+        self.run_search()
 
     def show_rows(self, title: str, rows: list[tuple[str, str, str]], hint: str = "") -> None:
         """Filas fijas de solo lectura (cabecera de un script)."""
@@ -137,6 +199,7 @@ class PropertyView(ttk.Frame):
         for name, type_text, value in rows:
             self.tree.insert("", "end", text=name, values=(type_text, value))
         self.set_hint(hint)
+        self.run_search()
 
     def show_bod(self, title: str, document: bod.BodDocument, edited_paths: set[tuple] | None = None) -> None:
         self._reset(title)
@@ -149,10 +212,13 @@ class PropertyView(ttk.Frame):
                           "de esos tipos; lo demás es de solo lectura")
         else:
             self.set_hint("Doble clic o F2 para editar un valor · clic derecho para más opciones")
+        # Al cambiar de objeto los criterios se conservan y la selección no se mueve.
+        self.run_search()
 
     def set_edited(self, paths: set[tuple]) -> None:
         self.edited_paths = set(paths)
         self.refresh_values()
+        self.run_search()
 
     def rebuild(self, title: str, document: bod.BodDocument, edited_paths: set[tuple], focus: tuple | None) -> None:
         """Vuelve a pintar el árbol tras un cambio de estructura, con los nodos abiertos de antes."""
@@ -194,9 +260,7 @@ class PropertyView(ttk.Frame):
     # --- Inserción perezosa --------------------------------------------------------------
 
     def _value_text(self, node: object) -> str:
-        if isinstance(node, bod.ExternalRef):
-            return f"→ {self.ref_label(node.identity)}"
-        return bod.value_text(node)
+        return search.row_value_text(node, self.ref_label)
 
     def _tags(self, node: object, path: tuple) -> tuple[str, ...]:
         if path in self.edited_paths:
@@ -271,6 +335,100 @@ class PropertyView(ttk.Frame):
             self.tree.selection_set(parent)
             self.tree.focus(parent)
             self.tree.see(parent)
+            self._update_search_count()
+
+    # --- Búsqueda en el objeto -----------------------------------------------------------
+
+    def focus_search(self) -> None:
+        """Ctrl+F: lleva el foco al último campo usado de la barra, con su texto seleccionado."""
+        self.cancel_edit()
+        field = self._last_search_field
+        field.focus_set()
+        field.select_range(0, "end")
+        field.icursor("end")
+
+    def _fill_type_choices(self) -> None:
+        """Los tipos del objeto abierto, calculados al desplegar la lista."""
+        if self._search_types is None:
+            self._search_types = search.tree_types(self.document) if self.document is not None else []
+        self.search_type.configure(values=(search.ANY_TYPE, *self._search_types))
+
+    def _query(self) -> tuple[str, str, str]:
+        return self.search_name_var.get(), self.search_type_var.get(), self.search_value_var.get()
+
+    def _schedule_search(self) -> None:
+        self.cancel_pending()
+        self._search_after = self.after(SEARCH_DELAY, lambda: self.run_search(move=True))
+
+    def cancel_pending(self) -> None:
+        """Anula el recálculo programado al teclear (al cerrar la ventana)."""
+        if self._search_after is not None:
+            self.after_cancel(self._search_after)
+            self._search_after = None
+
+    def run_search(self, move: bool = False) -> None:
+        """Recalcula los resultados. Con ``move`` (al escribir) va al primero desde la fila actual."""
+        self.cancel_pending()
+        if self.document is None:
+            self.search_results = []
+        else:
+            self.search_results = search.find_in_tree(self.document, *self._query(), ref_label=self.ref_label)
+        self._search_rank = {path: index for index, path in enumerate(self.search_results)}
+        current = self._selected_path()
+        if move and self.search_results and current not in self._search_rank:
+            self._go_to_result(self._step(forward=True))
+        self._update_search_count()
+
+    def next_result(self) -> None:
+        if self.search_results:
+            self._go_to_result(self._step(forward=True))
+
+    def previous_result(self) -> None:
+        if self.search_results:
+            self._go_to_result(self._step(forward=False))
+
+    def _step(self, forward: bool) -> int:
+        """Índice del resultado siguiente o anterior a la fila seleccionada, con vuelta al principio."""
+        results = self.search_results
+        anchor = self._anchor()
+        if anchor is None:
+            return 0 if forward else len(results) - 1
+        path, is_row = anchor
+        if forward:
+            index = bisect_right(results, path) if is_row else bisect_left(results, path)
+            return index if index < len(results) else 0
+        index = bisect_left(results, path) - 1
+        return index if index >= 0 else len(results) - 1
+
+    def _anchor(self) -> tuple[tuple, bool] | None:
+        """Ruta de la fila seleccionada y si es un valor; un tramo cuenta como su primer elemento."""
+        selection = self.tree.selection()
+        item = self._items.get(selection[0]) if selection else None
+        if item is None:
+            return None
+        if len(item) == 4:
+            _node, path, start, _end = item
+            return path + (start,), False
+        return item[1], True
+
+    def _selected_path(self) -> tuple | None:
+        selected = self.selected()
+        return selected[1] if selected else None
+
+    def _go_to_result(self, index: int) -> None:
+        self.cancel_edit()
+        self.reveal(self.search_results[index])
+
+    def _update_search_count(self) -> None:
+        if self.document is None or search.is_empty_query(*self._query()):
+            text = ""
+        elif not self.search_results:
+            text = "Sin resultados"
+        else:
+            rank = self._search_rank.get(self._selected_path())  # type: ignore[arg-type]
+            total = len(self.search_results)
+            text = f"{rank + 1:,} de {total:,}" if rank is not None else count_text(total, "resultado")
+        self.search_count_var.set(text)
 
     # --- Selección -----------------------------------------------------------------------
 
@@ -283,6 +441,10 @@ class PropertyView(ttk.Frame):
         if item is None or len(item) != 2:
             return None
         return item
+
+    def _on_select(self, _event: object = None) -> None:
+        self._update_search_count()
+        self._show_selection_hint()
 
     def _show_selection_hint(self) -> None:
         if self.editing or self.document is None:
