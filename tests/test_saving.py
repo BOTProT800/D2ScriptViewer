@@ -24,6 +24,9 @@ from d2scriptviewer.verification import verify_data
 from tests import fixtures
 from tests.support import ORIGINAL_SHA256, REAL_OBSP, TempDirMixin, requires_real_file
 
+#: Root escribe en archivos de solo lectura: los permisos no se pueden probar con él.
+RUNNING_AS_ROOT = getattr(os, "geteuid", lambda: -1)() == 0
+
 
 def label_path(tree: bod.BodDocument, label: str) -> tuple:
     return next(path for path, _node in bod.walk(tree.root) if bod.path_label(tree, path) == label)
@@ -59,7 +62,9 @@ class SavingTests(TempDirMixin, unittest.TestCase):
         self.assertTrue(result.original_created)
         self.assertFalse(result.original_is_steam)
         self.assertEqual(copy.read_bytes(), self.original_bytes)
-        self.assertFalse(os.access(copy, os.W_OK))
+        self.assertFalse(copy.stat().st_mode & stat.S_IWRITE)
+        if not RUNNING_AS_ROOT:
+            self.assertFalse(os.access(copy, os.W_OK))
         self.assertTrue(any("ya venía modificado" in warning for warning in result.warnings))
         self.assertIn("Copia del original creada", result.summary())
         reopened = Document.open(self.target)
@@ -151,6 +156,7 @@ class SavingTests(TempDirMixin, unittest.TestCase):
         reopened = Document.open(self.target).bod(self.desc)
         self.assertEqual(bod.resolve(reopened, label_path(reopened, "Mesh")).name, bod.Name(name_hash("Mesh_Nueva"), "Mesh_Nueva"))
 
+    @unittest.skipIf(RUNNING_AS_ROOT, "root escribe en archivos de solo lectura")
     def test_read_only_target(self) -> None:
         self.edit("Health", "5")
         os.chmod(self.target, stat.S_IREAD)

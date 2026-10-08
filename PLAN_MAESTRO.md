@@ -1,5 +1,24 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 10 cerrada (2026-10-08): búsqueda dentro del objeto.** Los dos tests con el archivo
+> real (`RealTreeSearchTests`) pasan con una copia idéntica a la de Steam (18 334 463 bytes,
+> SHA-256 `B46DD3DA…` comprobado antes de ejecutarlos):
+>
+> - en `death/death`, `op_3A` + `NumSlots` da las 7 rutas de `Funciones.onInit`, de `0x0770`
+>   a `0x0A4A`, y el `int32` siguiente vale 21, 21, 21, 22, 22, 22 y 21;
+> - el objeto mayor (`base/itemfoleytable`) se busca en 18–27 ms con los cuatro criterios del
+>   test, lejos del límite de 200 ms.
+>
+> **Desviación:** se ejecutaron en Linux (contenedor en la nube, Python 3.12.3 y Tk 8.6.14), no
+> en Windows. El usuario subió el archivo a la sesión y pidió cerrar la fase si pasaban. Ningún
+> dato del juego entró en el repositorio.
+>
+> Root escribe en archivos de solo lectura, así que dos tests de `test_saving` fallaban al
+> ejecutar la suite como root (nota de la fase 10). Decisión del usuario: omitirlos como root.
+> `test_read_only_target` se omite entero. En `test_first_save_creates_verified_read_only_copy`
+> solo se omite `os.access`: como root se comprueba el bit de solo lectura y el resto del test se
+> ejecuta. En Windows y como usuario normal no cambia nada.
+
 > **Fase 10 implementada (2026-10-07): búsqueda dentro del objeto.** Falta pasar sus dos tests
 > con el archivo real: se escribieron en un contenedor Linux sin `scripts.obsp` y quedaron
 > omitidos. Se cierra cuando pasen en Windows con `D2SV_OBSP`.

@@ -33,10 +33,10 @@ JSON/CSV y parches `.d2svpatch.json`) cerrada y validada en el juego: un parche 
 restaurar reproduce byte a byte el archivo guardado a mano. Fase 9 (distribución) cerrada:
 versión 1.0.0, ejecutable de Windows con PyInstaller 6.22.3 y workflow de release, preparados en
 local; el push, la visibilidad del repositorio y la etiqueta los decide el usuario. Las fases 0
-a 9 están cerradas. Fase 10 (búsqueda dentro del objeto) implementada el 7 de octubre de 2026: una
+a 9 están cerradas. Fase 10 (búsqueda dentro del objeto) cerrada el 8 de octubre de 2026: una
 barra en el panel de propiedades con un campo por columna, Ctrl+F para el objeto y Ctrl+Mayús+F
-para la búsqueda global. Se cierra cuando pasen en Windows sus dos tests con el archivo real
-(`RealTreeSearchTests`). Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+para la búsqueda global; sus dos tests con el archivo real (`RealTreeSearchTests`) pasan. Las
+decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
