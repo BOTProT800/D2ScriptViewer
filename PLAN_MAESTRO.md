@@ -1,5 +1,89 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 11 abierta (2026-10-09): ir a una ruta.** El usuario pidió pegar una ruta como
+> `MoveStates[44].JumpImpulse` y que el panel de propiedades salte a esa fila. Decisiones del
+> usuario:
+>
+> - **Acceso:** Ctrl+G y el menú Ir → «Ir a la ruta…», desde cualquier panel de la ventana
+>   principal (no desde la búsqueda global ni desde los diálogos). Cancelan una celda en edición,
+>   como Ctrl+F. El campo es una barra «Ir a» dentro del panel de propiedades, entre la barra de
+>   búsqueda y el árbol:
+>   - aparece con Ctrl+G y se oculta con Escape o al llegar;
+>   - si la ruta falla, sigue abierta con el tramo que falló seleccionado;
+>   - se rellena con el portapapeles si parece una ruta y, si no, con el último texto usado.
+> - **Formato:** el de «Copiar ruta de la propiedad» (`bod.path_label`), también en los scripts
+>   (`Funciones.onInit.0x004E`), relativo al objeto abierto.
+>   - Con el objeto delante, `objeto · propiedad`, con o sin espacios. También vale `::`, para
+>     teclados sin «·».
+>   - Un texto sin separador cuyo primer tramo lleva «/» abre ese objeto.
+>   - Nueva entrada «Copiar ruta completa» en el clic derecho, con « · ».
+> - **Mayúsculas:** por tramo, primero el nombre exacto; si no lo hay, sin distinguir
+>   mayúsculas y solo si la coincidencia es única.
+>   - Si son varias, se queda en el padre y la pista las nombra.
+>   - Ante dos campos exactamente iguales, va al primero y lo avisa.
+> - **Fallos:** va al nodo válido más profundo, o al objeto si falla el primer tramo. La pista
+>   dice qué tramo falló y por qué: hasta 3 nombres parecidos, el rango válido de un índice o lo
+>   que se esperaba. Si el objeto no existe o el texto no es una ruta, no se navega.
+> - **Alcance:** entran dos errores previos de la pista:
+>   - tras Ctrl+D sobre una entrada de mapa, el aviso de clave repetida desaparece en cuanto Tk
+>     procesa los eventos (el test actual no los procesa);
+>   - un `.capitalize()` deja en minúsculas las teclas de la pista de estructura («Ctrl+d
+>     duplica, supr elimina…»).
+>
+>   Quedan fuera los índices por `Name` (`MoveStates[Jump]`), el autocompletado de rutas y una
+>   opción en la CLI.
+>
+> Medido sobre la copia de `D2SV_OBSP` (7 862 objetos, 1 145 518 filas):
+>
+> - **Etiquetas de campo:**
+>   - las de los BOD solo tienen letras y cifras;
+>   - las de los árboles de los scripts añaden `_`, tildes (`Versión`, `Símbolos`,
+>     `Parámetros`) y espacios en tres etiquetas fijas (`Hash de ruta`, `Clase base`,
+>     `Valores iniciales`);
+>   - ninguna contiene `.`, `[`, `]`, `·`, `:` ni `/`, ni se llama `clave`, `valor` o `(raíz)`;
+>   - las 5 898 que empiezan por cifra son desplazamientos `0xNNNN`.
+> - **Nombres repetidos:**
+>   - solo un objeto `07` repite un nombre de campo: `wailing_host/wailing_host ·
+>     Miembros.StageThreeHealthPct` (miembros 6 y 7);
+>   - solo `base/simpleinteractive · Funciones` tiene dos que difieren en mayúsculas
+>     (`activate` y `Activate`).
+> - **Rutas de objeto:**
+>   - son únicas y están en minúsculas;
+>   - solo usan `a-z`, `0-9`, `_`, `/` y un espacio, en una sola ruta (`base/volcanic rumbles`);
+>     ninguna lleva `·` ni `::`;
+>   - 792 objetos comparten nombre con otro, así que el objeto se identifica por su ruta.
+> - **Prototipo:**
+>   - la ida y vuelta `path_label` → ruta acierta en 1 145 517 filas; solo falla la segunda de
+>     `wailing_host`;
+>   - resolver cuesta unos 10 µs por ruta;
+>   - sugerir con `difflib` cuesta 1,6 ms en el `07` con más campos y 44 ms sobre las 7 862
+>     rutas de objeto.
+> - `path_label` en todas las filas tarda 17–22 s, porque `bod.children` construye la lista
+>   entera de hijos en cada paso.
+> - `<<TreeviewSelect>>` llega por la cola de eventos: tras `reveal`, la pista de la fila pisa
+>   cualquier mensaje puesto antes. Es lo que borra el aviso de clave repetida.
+> - 16 objetos superan los 48 KB y se decodifican en un hilo; entre ellos está el del ejemplo,
+>   `death/playercommon_movestates` (50 374 bytes).
+>
+> Detalles decididos al planificar, dentro de lo acordado:
+>
+> - **Pista retenida:** un mensaje puesto al saltar no lo pisa la selección que provoca el salto;
+>   la pista normal vuelve al elegir otra fila.
+> - **Intento flexible:** además de las mayúsculas, ignora las tildes (`Parametros` llega a
+>   `Parámetros`). No crea coincidencias nuevas entre hermanos.
+> - **Desplazamientos:** un tramo `0x…` sin coincidencia de texto se compara por valor (`0x4e`
+>   es `0x004E`). Uno que cae dentro de una instrucción se queda en la función y dice en cuál está.
+> - **Texto tolerado:** espacios entre tramos, `[ 44 ]`, ceros a la izquierda, `\` por `/` en el
+>   objeto y comillas, `«»` o acentos graves que envuelvan el texto (al copiar del `.md`).
+> - `[texto]` es un error de sintaxis que dice que los índices por `Name` no están disponibles.
+> - **«Parece una ruta»:**
+>   - una sola línea de hasta 256 caracteres, con la sintaxis válida y alguno de `.`, `[`, `·`,
+>     `::` o `/`;
+>   - además, el objeto existe o el primer tramo es un campo de la raíz del objeto abierto;
+>   - el texto entra seleccionado.
+>
+> Criterios en la fase 11 de la sección 7.
+
 > **Fase 10 cerrada (2026-10-08): búsqueda dentro del objeto.** Los dos tests con el archivo
 > real (`RealTreeSearchTests`) pasan con una copia idéntica a la de Steam (18 334 463 bytes,
 > SHA-256 `B46DD3DA…` comprobado antes de ejecutarlos):
@@ -1030,6 +1114,79 @@ Decisiones del 2026-10-06 en la nota del principio.
   - el plan, sección 6 incluida;
   - `CLAUDE.md`, `CHANGELOG.md` (`[Unreleased]`) y el README;
   - `GUIA_MODDER.md`: atajos, y el ejemplo del inventario marcado como no probado en el juego.
+
+### Fase 11 — Ir a una ruta
+
+Decisiones del 2026-10-09 en la nota del principio.
+
+- **Barra «Ir a»** en el panel de propiedades, entre la barra de búsqueda y el árbol, oculta
+  hasta que se pulsa Ctrl+G o Ir → «Ir a la ruta…».
+  - Al abrirse, se rellena con el portapapeles si parece una ruta y, si no, con el último texto
+    usado, seleccionado. Ctrl+G con la barra abierta solo vuelve al campo y selecciona su texto.
+  - **Intro** va. Si llega, la barra se cierra y el foco pasa al árbol con la fila
+    seleccionada, que F2 edita. Si falla, sigue abierta con el tramo que falló seleccionado.
+  - **Escape** cierra la barra y devuelve el foco al árbol.
+  - Ctrl+Z, Ctrl+Y y Ctrl+P en el campo no tocan el archivo.
+  - Ctrl+G solo actúa en la ventana principal y cancela una celda en edición.
+- **Formatos:**
+  - `propiedad`: la etiqueta de `bod.path_label`, en el objeto abierto.
+  - `objeto · propiedad` u `objeto::propiedad`, con espacios opcionales: cambia de objeto, y
+    el cambio queda en el historial (Alt+←).
+  - `objeto` solo, con «/» en el primer tramo: abre el objeto.
+  - «Copiar ruta completa» (clic derecho) copia `objeto · propiedad`.
+- **Resolución, tramo a tramo:**
+  - un nombre: exacto; si no, sin mayúsculas ni tildes y único; en `0x…`, por valor;
+  - un par: `clave` o `valor`;
+  - un índice: `[n]` dentro del rango.
+- **Pista**, retenida (no la pisa la selección que provoca el salto):
+  - en un fallo: el tramo, el motivo y hasta 3 nombres parecidos, el rango válido o lo que se
+    esperaba;
+  - con dos campos iguales: va al primero y lo avisa;
+  - con un objeto inexistente: no navega y sugiere rutas parecidas.
+- **Objetos que se decodifican en un hilo:** la ruta se resuelve al terminar, sin congelar la
+  ventana. Si mientras tanto se cambia de objeto, no se salta.
+- **Errores previos de la pista:** el aviso de clave repetida usa la pista retenida, y la pista
+  de estructura conserva las mayúsculas de las teclas.
+- **Núcleo sin Tk:**
+  - en `bod.py`, la inversa de `path_label` (texto → pasos, con errores de sintaxis claros) y
+    su resolución sobre un árbol, que da el nodo válido más profundo y el motivo del fallo;
+  - en `Document`, la resolución del objeto y `full_label`, lo que hoy hace `_label`.
+
+  La GUI solo la llama y navega con `navigate` y `reveal`.
+
+**Hecho cuando:**
+
+- la barra, las teclas, el relleno y la pista funcionan como se describe arriba;
+- hay tests unitarios con los fixtures:
+  - ida y vuelta `path_label` → ruta en todas las filas de los 4 objetos;
+  - pares (`clave` y `valor`), una lista de más de 500 elementos (`big_list_document`) y un
+    script;
+  - mayúsculas y su ambigüedad;
+  - rutas que fallan a mitad (nombre, índice y tipo);
+  - texto vacío o sin sentido;
+  - el formato con objeto, el objeto solo y cuándo «parece una ruta»;
+- hay tests de la GUI, con `invoke_binding`:
+  - Ctrl+G y el menú;
+  - ir a una fila dentro de un tramo;
+  - saltar de objeto, también cuando se decodifica en un hilo;
+  - el error en la pista, comprobado después de procesar los eventos;
+  - Ctrl+Z en el campo no deshace el archivo;
+  - el relleno desde el portapapeles;
+  - «Copiar ruta completa»;
+  - el aviso de clave repetida sigue en la pista después de procesar los eventos, y la pista de
+    estructura conserva las mayúsculas;
+- hay tests con el archivo real:
+  - ida y vuelta en todas las filas de los 7 862 objetos, con su tiempo medido; la segunda fila
+    de `wailing_host` va a la primera, con aviso;
+  - `MoveStates[44].JumpImpulse` en `death/playercommon_movestates` (float 350),
+    `Funciones.onInit.0x004E` en `ui_core/pausemenu` (bool true) y
+    `Dialogs[0].Actions[1].FlagID` en `base/quest_test_dialog`;
+- no hace falta prueba en el juego: no cambia el formato ni el guardado;
+- están actualizados:
+  - el plan, sección 6 incluida;
+  - `CLAUDE.md`, `CHANGELOG.md` (`[Unreleased]`) y el README;
+  - `GUIA_MODDER.md`: el atajo, el menú, y que las rutas de la tabla «Lo que ya está probado»
+    se pueden pegar en Ctrl+G.
 
 ## 8. Estrategia de pruebas
 
