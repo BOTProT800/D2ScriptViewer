@@ -9,6 +9,17 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ### Added
 
+- Ir a una ruta (fase 11): Ctrl+G o Ir → Ir a la ruta… abre una barra «Ir a» sobre el árbol de
+  propiedades. Se pega una ruta como `MoveStates[44].JumpImpulse` (o `Funciones.onInit.0x004E` en
+  un script) y el árbol se abre hasta esa fila, también dentro de los tramos de las listas largas.
+  Con el objeto delante (`death/playercommon_movestates · MoveStates[44].JumpImpulse`, o con `::`)
+  salta de objeto, y el objeto solo lo abre. Primero busca cada nombre exacto y, si no está, sin
+  distinguir mayúsculas ni tildes cuando solo hay una posibilidad. Si la ruta falla a mitad, se
+  queda en la última fila válida y la línea bajo el árbol dice qué tramo falló y por qué, con los
+  nombres parecidos o el rango de la lista. La barra se rellena con el portapapeles si contiene
+  una ruta.
+- «Copiar ruta completa» en el clic derecho de las propiedades: `objeto · propiedad`, que Ctrl+G
+  lee tal cual.
 - Búsqueda dentro del objeto (fase 10): una barra sobre el árbol de propiedades con un campo por
   columna, Nombre, Tipo (desplegable con los tipos del objeto abierto) y Valor, combinados con
   «y» y sin distinguir mayúsculas. Busca en todo el objeto, también en los nodos y tramos que no
@@ -25,6 +36,14 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 - Ctrl+F lleva a la barra de búsqueda del objeto. La búsqueda en todo el archivo pasa a
   Ctrl+Mayús+F (menú Buscar → Buscar en todo el archivo…).
+
+### Fixed
+
+- El aviso de clave repetida tras duplicar una entrada de mapa (Ctrl+D) desaparecía en cuanto la
+  ventana procesaba los eventos: lo sustituía la pista de la fila nueva. Ahora se mantiene hasta
+  que se elige otra fila.
+- La pista de estructura de algunas filas mostraba las teclas en minúsculas («Ctrl+d duplica,
+  supr elimina…»).
 
 ## [1.0.0] - 2026-10-04
 

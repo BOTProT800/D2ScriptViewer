@@ -15,6 +15,12 @@ Búsqueda en el objeto (fase 10): una barra bajo el título con un campo por
 columna (Nombre, Tipo y Valor). :func:`search.find_in_tree` da las rutas en el
 orden de las filas, que es el lexicográfico de las rutas, y el panel recorre los
 resultados de uno en uno con :meth:`reveal`.
+
+Ir a una ruta (fase 11): una barra «Ir a», oculta hasta Ctrl+G, entre la de
+búsqueda y el árbol. El panel solo muestra el campo y el resultado; la ruta la
+analiza y la resuelve la aplicación con el núcleo (``on_goto``). Un mensaje
+puesto al saltar se retiene (``set_hint(..., hold=True)``): la selección que
+provoca el salto llega después por la cola de eventos y no lo pisa.
 """
 
 from __future__ import annotations
@@ -44,6 +50,14 @@ Hint = Callable[[object, tuple, str], "tuple[bool, str]"]
 HINT_STYLES = {"info": "PanelMuted.TLabel", "ok": "HintOk.TLabel", "error": "HintError.TLabel", "warn": "HintWarn.TLabel"}
 
 
+def _tk_index(text: str, index: int) -> int:
+    """Posición de ``text[index]`` para un widget de Tk 8.6, que cuenta en UTF-16: los caracteres
+    fuera del plano básico (un emoji) ocupan dos posiciones."""
+    if tk.TkVersion >= 9:
+        return index
+    return index + sum(1 for char in text[:index] if ord(char) > 0xFFFF)
+
+
 class PropertyView(ttk.Frame):
     def __init__(
         self,
@@ -57,6 +71,9 @@ class PropertyView(ttk.Frame):
         on_structure: Callable[[str, tuple], None] | None = None,
         hint: Hint | None = None,
         suggest: Callable[[str], list[str]] | None = None,
+        on_goto: Callable[[str], None] | None = None,
+        on_goto_cancel: Callable[[], None] | None = None,
+        full_label: Callable[[tuple], str] | None = None,
     ) -> None:
         super().__init__(master, style="Panel.TFrame", padding=10)
         self.ref_label = ref_label
@@ -68,6 +85,11 @@ class PropertyView(ttk.Frame):
         self.on_structure = on_structure
         self.hint = hint
         self.suggest = suggest
+        #: Intro en la barra «Ir a» (fase 11), con el texto escrito, y Escape, que anula un salto pendiente.
+        self.on_goto = on_goto
+        self.on_goto_cancel = on_goto_cancel
+        #: ``objeto · propiedad`` de una ruta, para «Copiar ruta completa».
+        self.full_label = full_label
         self.document: bod.BodDocument | None = None
         self.edited_paths: set[tuple] = set()
         self.editor: InlineEditor | None = None
@@ -80,6 +102,11 @@ class PropertyView(ttk.Frame):
         self._search_rank: dict[tuple, int] = {}
         self._search_after: str | None = None
         self._search_types: list[str] | None = None
+        #: Fila (iid, o "" sin selección) cuya selección no borra la pista retenida.
+        self._hint_hold: str | None = None
+        #: Si la pista retenida es de la barra «Ir a»: Escape o un salto correcto la retiran; un aviso
+        #: de otro origen (la clave repetida tras Ctrl+D) sigue hasta que se elige otra fila.
+        self._hint_from_goto = False
 
         self.title_var = tk.StringVar(value="")
         self.hint_var = tk.StringVar(value="")
@@ -94,6 +121,7 @@ class PropertyView(ttk.Frame):
         self.hint_label = ttk.Label(self, textvariable=self.hint_var, style="PanelMuted.TLabel", wraplength=600, justify="left")
         self.hint_label.pack(side="bottom", fill="x", pady=(6, 0))
         self._build_search_bar()
+        self._build_goto_bar()
 
         frame, self.tree = theme.scrolled(
             self,
@@ -174,6 +202,97 @@ class PropertyView(ttk.Frame):
         for variable in (self.search_name_var, self.search_type_var, self.search_value_var):
             variable.trace_add("write", lambda *_: self._schedule_search())
 
+    def _build_goto_bar(self) -> None:
+        """La barra «Ir a» (fase 11): se construye una vez y se muestra con :meth:`show_goto`."""
+        self.goto_var = tk.StringVar()
+        bar = ttk.Frame(self, style="Panel.TFrame")
+        self.goto_bar = bar
+        ttk.Label(bar, text="Ir a", style="PanelMuted.TLabel").pack(side="left")
+        self.goto_entry = ttk.Entry(bar, textvariable=self.goto_var)
+        self.goto_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        for sequence in ("<Return>", "<KP_Enter>"):
+            self.goto_entry.bind(sequence, lambda _event: self._submit_goto() or "break")
+        self.goto_entry.bind("<Escape>", lambda _event: self.hide_goto() or "break")
+
+    # --- Ir a una ruta -------------------------------------------------------------------
+
+    @property
+    def goto_visible(self) -> bool:
+        return bool(self.goto_bar.winfo_manager())
+
+    def show_goto(self, text: str | None = None) -> None:
+        """Muestra la barra «Ir a» con el foco en el campo y su texto seleccionado.
+
+        ``text`` sustituye lo escrito; con ``None`` queda el último texto usado.
+        """
+        self.cancel_edit()
+        if not self.goto_visible:
+            self.goto_bar.pack(fill="x", pady=(0, 6), after=self.search_bar)
+        if text is not None:
+            self.goto_var.set(text)
+        self.goto_entry.focus_set()
+        self.goto_entry.select_range(0, "end")
+        self.goto_entry.icursor("end")
+
+    def hide_goto(self) -> None:
+        """Escape: oculta la barra, anula el salto pendiente y devuelve el foco al árbol.
+
+        Un error retenido de la barra da paso a la pista de la fila.
+        """
+        if self.goto_visible:
+            self.goto_bar.pack_forget()
+        if self.on_goto_cancel is not None:
+            self.on_goto_cancel()
+        self._release_goto_hint()
+        self.tree.focus_set()
+
+    def _release_goto_hint(self) -> None:
+        if self._hint_hold is not None and self._hint_from_goto:
+            self.set_hint("")
+            self._show_selection_hint()
+
+    def _submit_goto(self) -> None:
+        if self.on_goto is not None:
+            self.on_goto(self.goto_var.get())
+
+    def _focus_is_free(self) -> bool:
+        """Si el foco sigue en la barra «Ir a» (o en ningún sitio): tras decodificar en un hilo, el
+        usuario puede estar ya escribiendo en otro campo, y no hay que quitárselo."""
+        try:
+            focused = self.focus_get()
+        except KeyError:  # un widget interno de Tk (la lista de un desplegable)
+            return False
+        return focused is None or focused is self.goto_entry
+
+    def goto_done(self, note: str = "") -> None:
+        """Se llegó: la barra se cierra y el árbol recibe el foco, con la fila ya seleccionada."""
+        free = self._focus_is_free()
+        if self.goto_visible:
+            self.goto_bar.pack_forget()
+        if free:
+            self.tree.focus_set()
+        if note:
+            self.set_hint(note, "warn", hold=True)
+            self._hint_from_goto = True
+        else:
+            # Un error de un intento anterior sobre esta misma fila ya no vale.
+            self._release_goto_hint()
+
+    def goto_failed(self, message: str, start: int = 0, end: int = 0) -> None:
+        """La ruta no llegó: la pista dice por qué y el campo señala el tramo culpable."""
+        if not self.goto_visible:
+            self.goto_bar.pack(fill="x", pady=(0, 6), after=self.search_bar)
+        self.set_hint(message, "error", hold=True)
+        self._hint_from_goto = True
+        if self._focus_is_free():
+            self.goto_entry.focus_set()
+        if end > start:
+            text = self.goto_var.get()
+            self.goto_entry.select_range(_tk_index(text, start), _tk_index(text, end))
+            self.goto_entry.icursor(_tk_index(text, end))
+        else:
+            self.goto_entry.select_range(0, "end")
+
     # --- Contenido -----------------------------------------------------------------------
 
     def _reset(self, title: str) -> None:
@@ -253,9 +372,18 @@ class PropertyView(ttk.Frame):
                     iid, values=(bod.type_text(node), self._value_text(node)), tags=self._tags(node, path)
                 )
 
-    def set_hint(self, text: str, kind: str = "info") -> None:
+    def set_hint(self, text: str, kind: str = "info", *, hold: bool = False) -> None:
+        """Escribe la pista bajo el árbol.
+
+        Con ``hold``, el mensaje sigue mientras la fila seleccionada sea la de ahora: la selección
+        de un salto llega después por la cola de eventos y, sin esto, lo sustituiría por la pista
+        de la fila.
+        """
         self.hint_var.set(text)
         self.hint_label.configure(style=HINT_STYLES.get(kind, HINT_STYLES["info"]))
+        selection = self.tree.selection()
+        self._hint_hold = (selection[0] if selection else "") if hold else None
+        self._hint_from_goto = False
 
     # --- Inserción perezosa --------------------------------------------------------------
 
@@ -366,6 +494,14 @@ class PropertyView(ttk.Frame):
             self.after_cancel(self._search_after)
             self._search_after = None
 
+    def flush_search(self) -> None:
+        """Recalcula ya, sin mover la selección, si había un recálculo pendiente de lo tecleado.
+
+        Antes de un salto (fase 11): el temporizador, al vencer, iría al primer resultado.
+        """
+        if self._search_after is not None:
+            self.run_search()
+
     def run_search(self, move: bool = False) -> None:
         """Recalcula los resultados. Con ``move`` (al escribir) va al primero desde la fila actual."""
         self.cancel_pending()
@@ -449,6 +585,11 @@ class PropertyView(ttk.Frame):
     def _show_selection_hint(self) -> None:
         if self.editing or self.document is None:
             return
+        if self._hint_hold is not None:
+            selection = self.tree.selection()
+            if (selection[0] if selection else "") == self._hint_hold:
+                return
+            self._hint_hold = None
         selected = self.selected()
         if selected is None:
             return
@@ -475,7 +616,8 @@ class PropertyView(ttk.Frame):
         elif edits.is_editable(node):
             self.set_hint("Doble clic o F2 para editar" + structure)
         elif structure:
-            self.set_hint(structure.removeprefix(" · ").capitalize())
+            text = structure.removeprefix(" · ")
+            self.set_hint(text[:1].upper() + text[1:])
         elif isinstance(node, bod.BodTuple) or (path and isinstance(bod.resolve(self.document, path[:-1]), bod.BodTuple)):
             self.set_hint("Las tuplas tienen tamaño fijo en el juego: solo se editan sus valores")
         else:
@@ -571,9 +713,14 @@ class PropertyView(ttk.Frame):
         self._show_selection_hint()
 
     def _on_context_menu(self, event: tk.Event) -> None:
-        iid = self.tree.identify_row(event.y)
+        menu = self.context_menu(self.tree.identify_row(event.y))
+        if menu is not None:
+            menu.tk_popup(event.x_root, event.y_root)
+
+    def context_menu(self, iid: str) -> tk.Menu | None:
+        """El menú del clic derecho sobre la fila ``iid``, que queda seleccionada."""
         if not iid or iid not in self._items or len(self._items[iid]) != 2:
-            return
+            return None
         self.tree.selection_set(iid)
         self.tree.focus(iid)
         node, path = self._items[iid]
@@ -589,7 +736,10 @@ class PropertyView(ttk.Frame):
         menu.add_separator()
         menu.add_command(label="Copiar valor", command=lambda: self._copy(self._value_text(node)))
         menu.add_command(label="Copiar ruta de la propiedad", command=lambda: self._copy(bod.path_label(self.document, path)))
-        menu.tk_popup(event.x_root, event.y_root)
+        if self.full_label is not None:
+            full_label = self.full_label
+            menu.add_command(label="Copiar ruta completa", command=lambda: self._copy(full_label(path)))
+        return menu
 
     def structure_actions(self, node: object, path: tuple) -> list[str]:
         """Acciones estructurales que admite la fila (decisiones de la fase 5)."""

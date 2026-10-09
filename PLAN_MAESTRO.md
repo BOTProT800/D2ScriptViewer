@@ -1,5 +1,106 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 11 cerrada (2026-10-09): ir a una ruta.** Ctrl+G abre la barra «Ir a», que lee la ruta de
+> «Copiar ruta de la propiedad», `objeto · propiedad` (o `objeto::propiedad`) o el objeto solo, y
+> salta a esa fila. No cambia el formato ni el guardado, así que no necesita prueba en el juego.
+>
+> Criterios de «Hecho cuando», uno por uno:
+>
+> 1. **Barra, teclas, relleno y pista:** sí. Además de los tests, se probaron con teclas generadas
+>    en la ventana visible (Xvfb) y el archivo real:
+>    - Ctrl+G, escribir `MoveStates[44].JumpImpulse` e Intro: fila con 350 y foco en el árbol;
+>    - `ui_core/pausemenu::Funciones.onInit.0x004E`: salto de objeto a la fila con `true`;
+>    - `Funciones.onInit.0x004F`: se queda en la función y dice que la instrucción anterior es
+>      `0x004E`;
+>    - Ctrl+Z en el campo no cambia nada; Escape cierra la barra y Alt+← vuelve al objeto
+>      anterior.
+>
+>    El teclado de Xvfb no tiene la tecla «·», así que el separador « · » solo lo cubren los tests.
+> 2. **Tests unitarios con los fixtures** (`PathLabelInverseTests`, `LocationTests`): sí.
+>    - Ida y vuelta en todas las filas de los 4 objetos, también con el objeto delante.
+>    - Pares, la lista de 1 200 elementos y el script: `0x…` por valor, tildes y etiquetas con
+>      espacios.
+>    - Mayúsculas y su ambigüedad, y un campo repetido.
+>    - Fallos a mitad (nombre, índice y tipo) y errores de sintaxis.
+>    - Los formatos con objeto, el objeto solo y cuándo el portapapeles parece una ruta.
+> 3. **Tests de la GUI** (`GotoPathGuiTests`, y el aviso de clave repetida en
+>    `StructureGuiTests`): sí.
+>    - Ctrl+G y el menú, también con una celda en edición, sin archivo y desde la búsqueda global.
+>    - Una fila del mismo objeto y otra dentro de un tramo de otro objeto, con el historial.
+>    - Decodificación en un hilo: el salto, una ruta pedida mientras se decodifica y un cambio de
+>      objeto antes de que termine.
+>    - El error en la pista, comprobado tras `update()`, y Escape.
+>    - Ctrl+Z, Ctrl+Y y Ctrl+P en el campo, el portapapeles y «Copiar ruta completa».
+>    - La pista de estructura con las teclas en mayúscula.
+>
+>    Los tests de los dos errores previos fallan con el código anterior (comprobado con
+>    mutaciones).
+> 4. **Tests con el archivo real** (`RealPathLabelTests`): sí.
+>    - Ida y vuelta en las 1 145 518 filas de los 7 862 objetos: unos 19 s aquí (16 µs por fila;
+>      el test admite hasta 120 s). La única excepción es la prevista: la segunda fila de
+>      `wailing_host` va a la primera, con aviso.
+>    - Las tres rutas de la guía dan 350, `true` y `'flag_quest_debug_question_asked'` en las
+>      cuatro formas (sola, con « · », con `::` y entre acentos graves), cada una en menos de 50 ms.
+>    - `activate` y `Activate` en `base/simpleinteractive`.
+> 5. **Prueba en el juego:** no hace falta.
+> 6. **Documentación** (plan con las secciones 6 y 8, `CLAUDE.md`, `CHANGELOG.md`, README y
+>    `GUIA_MODDER.md`): sí.
+>
+> Detalles decididos al implementar:
+>
+> - `bod.child` da un hijo sin construir la lista entera de hijos. Lo usan `path_label`,
+>   `resolve` y `get_slot`, con la misma salida, comprobada en las 1 145 518 filas. `path_label`
+>   en todas las filas pasa de 17,1 s a 2,4 s.
+> - Un nombre se corta en `.`, `[`, `]`, `·`, `:` y en los caracteres de control. Así, un segundo
+>   `::` da un error de sintaxis claro en lugar de acabar dentro de un nombre.
+> - Cada mensaje de fallo empieza por el tramo que falló, que es el que la barra selecciona.
+> - Escape también retira un error retenido, para que vuelva la pista de la fila.
+> - `Document.parse_location` no necesita el árbol: la propiedad se resuelve cuando está
+>   decodificado, también tras hacerlo en un hilo.
+> - El menú del clic derecho se construye en `context_menu(iid)`, para poder probarlo, y el
+>   portapapeles se lee con `app.read_clipboard`, que los tests sustituyen.
+>
+> **Revisión adversarial**, tras el primer commit de cierre. Cuatro revisores (núcleo, GUI,
+> regresiones y tests) y un verificador por hallazgo. Se corrigió:
+>
+> - **Pista:**
+>   - un salto correcto a la fila donde se quedó un fallo anterior dejaba el error en rojo; ahora
+>     lo retira;
+>   - Escape retiraba también avisos que no eran de la barra (la clave repetida tras Ctrl+D);
+>     ahora solo retira los suyos.
+> - **Decodificación en un hilo:**
+>   - Escape no anulaba el salto que esperaba a la decodificación. Los verificadores lo vieron
+>     como algo que el plan no especifica («Escape cierra la barra»); se adopta porque la
+>     propuesta del usuario dice «Intro va y Escape cancela»;
+>   - un intento nuevo que fallaba no anulaba el anterior;
+>   - una ruta pedida con Ctrl+G perdía frente a la de la navegación (búsqueda global,
+>     referencias);
+>   - el fallo de un objeto ya abandonado sustituía al que se estaba viendo (error anterior a la
+>     fase, que el salto hacía alcanzable).
+> - **Texto:**
+>   - el espacio duro (U+00A0) y el tabulador cuentan como espacios;
+>   - un carácter invisible (U+200B, U+FEFF…) se señala con su código;
+>   - un salto de línea se señala donde está;
+>   - un índice de más de 18 cifras da un error claro, no una excepción;
+>   - con un carácter fuera del plano básico (un emoji), la barra marca el tramo correcto en
+>     Tk 8.6.
+> - **Tests:**
+>   - el caso «cambio de objeto antes de que termine» espera a la decodificación y mira qué se
+>     muestra;
+>   - nuevos: la nota de dos campos iguales en la GUI, la búsqueda pendiente antes del salto,
+>     Ctrl+G con la barra abierta, el Intro del teclado numérico, el foco ocupado por el usuario,
+>     un objeto que no decodifica y que `child` nunca recurre a `children`;
+>   - el del portapapeles ya no toca el del sistema.
+>
+> Cada test nuevo se comprobó con el código de antes o con una mutación: falla sin el arreglo.
+> Queda fuera, porque es anterior y afecta también a la barra de la fase 10: hacer clic en una
+> barra con una celda en edición devuelve el foco al árbol 150 ms después.
+>
+> **Desviación:** como en la fase 10, todo se ejecutó en Linux (contenedor en la nube, Python
+> 3.12.3 y Tk 8.6.14 bajo Xvfb), no en Windows. No entra material externo: `CREDITS.md` no cambia.
+>
+> 269 tests: 2 omitidos (el bloqueo de Windows y, como root, el de solo lectura) y código de salida 0.
+
 > **Fase 11 abierta (2026-10-09): ir a una ruta.** El usuario pidió pegar una ruta como
 > `MoveStates[44].JumpImpulse` y que el panel de propiedades salte a esa fila. Decisiones del
 > usuario:
@@ -867,14 +968,17 @@ Tres zonas, con el estilo visual de Darkstractor:
   y buscador. Los objetos modificados llevan una marca.
 - **Propiedades (centro).** `ttk.Treeview` con columnas Nombre | Tipo | Valor, carga perezosa de
   hijos y edición en línea con doble clic. Encima, una barra de búsqueda con un campo por columna
-  (fase 10): recorre los resultados de uno en uno, con contador.
+  (fase 10): recorre los resultados de uno en uno, con contador. Debajo de ella, la barra «Ir a»
+  (fase 11), oculta hasta Ctrl+G: lee una ruta (`MoveStates[44].JumpImpulse` u
+  `objeto · propiedad`) y salta a esa fila. El clic derecho copia la ruta de la propiedad o la
+  ruta completa.
 - **Detalles (derecha/abajo).** Ruta, nombre, clase, carpeta, grupo, id, tipo, offset y tamaño.
   Pestañas: Hex | Referencias ("apunta a" / "usado por") | Script.
 - **Barra de estado.** Estado del archivo (original / modificado), número de cambios pendientes y ruta.
 - **Acciones.** Abrir (Ctrl+O), Guardar (Ctrl+S), Guardar como, Deshacer/Rehacer (Ctrl+Z / Ctrl+Y),
   Revertir objeto, Cambios pendientes, Restaurar original, Buscar en el objeto (Ctrl+F; F3 y
-  Mayús+F3 recorren los resultados), Buscar en todo el archivo (Ctrl+Mayús+F) e Ir a referencia
-  (doble clic).
+  Mayús+F3 recorren los resultados), Buscar en todo el archivo (Ctrl+Mayús+F), Ir a la ruta
+  (Ctrl+G) e Ir a referencia (doble clic).
 
 Editores por tipo de valor:
 
@@ -1215,6 +1319,9 @@ Decisiones del 2026-10-09 en la nota del principio.
 - Prueba de humo: crear la ventana, cargar un fixture, seleccionar un objeto, editar un valor y cerrar.
 - Las ventanas se prueban ocultas. Como Tk descarta las teclas sintéticas sin foco, los atajos se
   prueban invocando el callback de su enlace (`invoke_binding` en `tests/test_gui.py`).
+- `<<TreeviewSelect>>` llega por la cola de eventos: lo que un test compruebe en la pista después
+  de seleccionar una fila exige procesar antes los eventos (`update()`), o pasaría sin comprobar
+  nada (fase 11).
 
 ### En el juego (manual)
 

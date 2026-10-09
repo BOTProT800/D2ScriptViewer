@@ -18,3 +18,12 @@ class EditError(D2ScriptViewerError):
 
 class SaveError(D2ScriptViewerError):
     """El guardado se detuvo; el archivo de destino no se ha tocado salvo que se diga."""
+
+
+class PathError(D2ScriptViewerError):
+    """Un texto que no lleva a ninguna parte (fase 11): ``start`` y ``end`` señalan el tramo culpable."""
+
+    def __init__(self, message: str, start: int = 0, end: int = 0) -> None:
+        super().__init__(message)
+        self.start = start
+        self.end = end

@@ -13,11 +13,13 @@ import re
 import time
 import tkinter as tk
 import unittest
+from unittest import mock
 
 from d2scriptviewer.document import Document
 from d2scriptviewer.formats import bod
+from d2scriptviewer.formats.obsp import IndexEntry, ObspHeader, build_obsp
 from d2scriptviewer.search import ANY_TYPE
-from d2scriptviewer.formats.hashes import name_hash
+from d2scriptviewer.formats.hashes import name_hash, object_id
 from tests import fixtures
 from tests.support import REAL_OBSP, TempDirMixin, requires_real_file
 
@@ -557,7 +559,9 @@ class StructureGuiTests(TempDirMixin, unittest.TestCase):
 
     def test_saving_is_blocked_by_a_repeated_key_and_warns_on_ids(self) -> None:
         self.app.structure_action("duplicate", self.path("Lookup[0]"))
-        self.assertIn("clave", self.view.hint_var.get())
+        self.app.update()  # la selección de la copia llega por la cola de eventos y no borra el aviso
+        self.assertIn("La copia repite la clave", self.view.hint_var.get())
+        self.assertEqual(self.selected_label(), "Lookup[1]")
         self.app.save()
         self.assertFalse(self.app.saving)
         self.assertEqual(len(self.alerts), 1)
@@ -795,6 +799,389 @@ class ObjectSearchGuiTests(unittest.TestCase):
         self.assertEqual(calls, ["barra"])
         invoke_binding(self.app, "<Control-F>", self.view.search_value, everywhere=True)
         self.assertIs(self.app.search_window, window)
+
+
+def goto_obsp() -> bytes:
+    """El OBSP de los fixtures más tres objetos para Ir a una ruta.
+
+    ``base/big_list`` tiene una lista que el panel reparte en tramos, ``base/twice`` dos campos
+    con el mismo nombre y ``base/broken`` un blob que no decodifica.
+    """
+    entries, blobs, strings = fixtures.fixture_parts()
+    twice = bod.BodObject(None, fixtures.native("Twice"), [
+        fixtures.F("Twice", bod.Int32.of(1)), fixtures.F("Twice", bod.Int32.of(2)), fixtures.F("Other", bod.Int32.of(3)),
+    ])
+    for path, name, blob in (
+        ("base/big_list", "Big_List", bod.encode(fixtures.big_list_document(2000))),
+        ("base/twice", "Twice", bod.encode(bod.BodDocument(4, 1, twice))),
+        ("base/broken", "Broken", bod.MAGIC + b"\xff" * 40),
+    ):
+        for text in (path, name, ""):
+            strings[name_hash(text)] = text
+        entries.append(IndexEntry(name_hash(path), object_id(name), 0, len(blob), fixtures.GROUP, 15,
+                                  name_hash(name), name_hash(""), name_hash("")))
+        blobs.append(blob)
+    header = ObspHeader(version=10, unknown=1, object_count=0, strings_end=0, string_count=0, max_string_length=0)
+    return build_obsp(header, entries, blobs, strings)
+
+
+@requires_tk
+class GotoPathGuiTests(unittest.TestCase):
+    """La barra «Ir a» del panel de propiedades (fase 11)."""
+
+    def setUp(self) -> None:
+        from d2scriptviewer.gui.app import ViewerApp
+
+        self.app = ViewerApp(auto_open=False, persist_settings=False)
+        self.app.withdraw()
+        self.addCleanup(self.app.destroy)
+        self.app.ask = lambda _title, _message, **_options: True
+        self.app.inform = lambda _title, _message: None
+        self.clipboard: str | None = None
+        self.app.read_clipboard = lambda: self.clipboard
+        self.document = Document.from_bytes(goto_obsp())
+        self.app.set_document(self.document)
+        self.assertTrue(pump(self.app, lambda: self.app.indexes is not None))
+        self.desc = self.document.find("death/death_desc")[0].position
+        self.instance = self.document.find("scripts/weaponbehavior_inst")[0].position
+        self.big = self.document.find("base/big_list")[0].position
+        self.broken = self.document.find("base/broken")[0].position
+        self.app.navigate(self.desc)
+        self.view = self.app.property_view
+        self.focused: list[str] = []
+        self.view.tree.focus_set = lambda: self.focused.append("árbol")  # type: ignore[method-assign]
+
+    def selected_label(self) -> str | None:
+        selected = self.view.selected()
+        return bod.path_label(self.view.document, selected[1]) if selected else None
+
+    def open_bar(self, widget: tk.Misc | None = None) -> None:
+        invoke_binding(self.app, "<Control-g>", widget or self.view.tree, everywhere=True)
+
+    def go(self, text: str) -> None:
+        self.open_bar()
+        self.view.goto_var.set(text)
+        invoke_binding(self.view.goto_entry, "<Return>")
+
+    def hint(self) -> str:
+        self.app.update()  # la selección del salto llega por la cola de eventos: no debe borrar la pista
+        return self.view.hint_var.get()
+
+    def marked(self) -> str:
+        """El texto seleccionado en el campo (Tk 8.6 cuenta en UTF-16: se lee tal cual, sin índices)."""
+        entry = self.view.goto_entry
+        return entry.selection_get() if entry.selection_present() else ""
+
+    def path(self, label: str) -> tuple:
+        tree = self.view.document
+        return next(path for path, _node in bod.walk(tree.root) if bod.path_label(tree, path) == label)
+
+    def decoding_in_a_thread(self):
+        from d2scriptviewer.gui import app as app_module
+
+        return mock.patch.object(app_module, "SYNC_DECODE_LIMIT", 0)
+
+    def test_ctrl_g_and_the_menu(self) -> None:
+        menu = self.app.nametowidget(self.app.menubar.entrycget("Ir", "menu"))
+        last = menu.index("end")
+        self.assertEqual((menu.entrycget(last, "label"), menu.entrycget(last, "accelerator")), ("Ir a la ruta…", "Ctrl+G"))
+        self.assertFalse(self.view.goto_visible)
+        menu.invoke(last)
+        self.assertTrue(self.view.goto_visible)
+        invoke_binding(self.view.goto_entry, "<Escape>")
+        self.assertFalse(self.view.goto_visible)
+        self.assertEqual(self.focused, ["árbol"])
+        for sequence in ("<Control-g>", "<Control-G>"):
+            invoke_binding(self.app, sequence, self.view.search_name, everywhere=True)
+            self.assertTrue(self.view.goto_visible, sequence)
+            self.view.hide_goto()
+        # Ctrl+G con una celda en edición la cancela y abre la barra.
+        self.view.reveal(next(path for path, _ in bod.walk(self.view.document.root)
+                              if bod.path_label(self.view.document, path) == "Health"))
+        self.view.begin_edit()
+        self.assertTrue(self.view.editing)
+        self.open_bar(self.view.editor.widget)
+        self.assertFalse(self.view.editing)
+        self.assertTrue(self.view.goto_visible)
+        self.view.hide_goto()
+        # En otra ventana (la búsqueda global) no salta a la principal.
+        self.app.open_search()
+        self.open_bar(self.app.search_window)
+        self.assertFalse(self.view.goto_visible)
+
+    def test_without_a_file(self) -> None:
+        from d2scriptviewer.gui.app import ViewerApp
+
+        app = ViewerApp(auto_open=False, persist_settings=False)
+        app.withdraw()
+        self.addCleanup(app.destroy)
+        app.update_idletasks()  # que el reparto inicial de los paneles no quede pendiente al destruirla
+        invoke_binding(app, "<Control-g>", app.property_view.tree, everywhere=True)
+        self.assertFalse(app.property_view.goto_visible)
+        self.assertIn("Abre antes", app.status_var.get())
+
+    def test_go_to_a_row(self) -> None:
+        self.go("Stats.Damage")
+        self.assertEqual(self.selected_label(), "Stats.Damage")
+        self.assertFalse(self.view.goto_visible)
+        self.assertEqual(self.focused, ["árbol"])
+        self.assertEqual(self.hint(), "Doble clic o F2 para editar")
+        for text, label in (("pairs[1].VALOR", "Pairs[1].valor"), ("  Slots [ 0 ] . Count ", "Slots[0].Count"),
+                            ("death/death_desc · Color[2]", "Color[2]"), ("`Script.Enabled`", "Script.Enabled")):
+            self.go(text)
+            self.assertEqual(self.selected_label(), label, text)
+        self.assertEqual(self.app.history_back, [])  # dentro del mismo objeto no hay historial
+
+    def test_row_inside_a_chunk_of_another_object(self) -> None:
+        self.go("base/big_list · Values[1234]")
+        self.assertEqual(self.app.position, self.big)
+        self.assertEqual(self.view.selected()[1], (0, 1234))
+        chunk = self.view.tree.parent(self.view._iid_by_path[(0, 1234)])
+        self.assertEqual(self.view.tree.item(chunk, "text"), "[1000…1499]")
+        self.assertTrue(self.view.tree.item(chunk, "open"))
+        self.assertFalse(self.view.goto_visible)
+        self.assertEqual(self.app.history_back, [self.desc])
+        self.go("Values[1999]")
+        self.assertEqual(self.view.tree.item(self.view.tree.parent(self.view._iid_by_path[(0, 1999)]), "text"),
+                         "[1500…1999]")
+        # El objeto solo, sin propiedad, lo abre.
+        self.go("death/death_desc")
+        self.assertEqual(self.app.position, self.desc)
+        self.assertFalse(self.view.goto_visible)
+        self.app.go_back()
+        self.assertEqual(self.app.position, self.big)
+
+    def test_jump_while_the_object_is_decoded_in_a_thread(self) -> None:
+        from d2scriptviewer.gui import app as app_module
+
+        with mock.patch.object(app_module, "SYNC_DECODE_LIMIT", 0):
+            self.go("scripts/weaponbehavior_inst · Enabled")
+            self.assertIsNone(self.view.document)  # «Decodificando…»
+            self.assertTrue(pump(self.app, lambda: self.selected_label() == "Enabled"))
+            self.assertFalse(self.view.goto_visible)
+            self.assertEqual(self.app.history_back, [self.desc])
+            # Una ruta del objeto abierto pedida mientras se decodifica espera a que termine.
+            self.app.navigate(self.big)
+            self.assertIsNone(self.view.document)
+            self.go("Values[700]")
+            self.assertTrue(pump(self.app, lambda: self.view.selected() is not None))
+            self.assertEqual(self.selected_label(), "Values[700]")
+            # Si se cambia de objeto antes de que termine, no se salta.
+            self.document._bod_cache.pop(self.instance)
+            self.go("scripts/weaponbehavior_inst · Owner")
+            self.assertIsNone(self.view.document)
+            self.app.navigate(self.desc)  # ya está en caché: se muestra al momento
+            self.assertTrue(pump(self.app, lambda: self.document.cached_bod(self.instance) is not None))
+            self.assertEqual(self.hint(), "Doble clic o F2 para editar un valor · clic derecho para más opciones")
+            self.assertEqual(self.app.position, self.desc)
+            self.assertIs(self.view.document, self.document.bod(self.desc))
+            self.assertTrue(self.view.title_var.get().startswith("death/death_desc"))
+            self.assertIsNone(self.view.selected())
+
+    def test_escape_cancels_a_jump_that_waits_for_the_decoding(self) -> None:
+        with self.decoding_in_a_thread():
+            for text in ("base/big_list · Values[1234]", "base/big_list · Values[5000]"):
+                self.app.navigate(self.desc)
+                self.document._bod_cache.pop(self.big, None)
+                self.go(text)
+                self.assertIsNone(self.view.document)
+                invoke_binding(self.view.goto_entry, "<Escape>")
+                self.assertTrue(pump(self.app, lambda: self.view.document is not None))
+                self.assertEqual((self.app.position, self.view.selected()), (self.big, None), text)
+                self.assertFalse(self.view.goto_visible, text)
+                self.assertNotIn("no existe", self.hint())
+
+    def test_the_latest_request_wins_while_decoding(self) -> None:
+        with self.decoding_in_a_thread():
+            # Un intento nuevo, aunque falle, anula el salto que esperaba.
+            self.go("base/big_list · Values[1234]")
+            self.go("death/death_dsc · Health")
+            self.assertTrue(pump(self.app, lambda: self.view.document is not None))
+            self.assertEqual((self.app.position, self.view.selected()), (self.big, None))
+            self.assertTrue(self.view.goto_visible)
+            # A un objeto al que se llegó con una ruta (búsqueda global, referencias): gana la de Ctrl+G.
+            self.app.navigate(self.desc)
+            self.document._bod_cache.pop(self.big)
+            self.app.navigate(self.big, (0, 5))
+            self.go("Values[700]")
+            self.assertTrue(pump(self.app, lambda: self.view.selected() is not None))
+            self.assertEqual(self.selected_label(), "Values[700]")
+            self.assertFalse(self.view.goto_visible)
+
+    def test_an_object_that_does_not_decode(self) -> None:
+        self.go("base/broken · Health")
+        self.assertEqual((self.app.position, self.view.document), (self.broken, None))
+        self.assertTrue(self.view.goto_visible)
+        self.assertIn("Este objeto no se pudo decodificar", self.hint())
+        self.go("Health")  # con el objeto ya mostrado
+        self.assertIn("Este objeto no se pudo decodificar", self.hint())
+        with self.decoding_in_a_thread():
+            self.app.navigate(self.desc)
+            self.go("base/broken · Health")
+            self.assertTrue(pump(self.app, lambda: "no se pudo decodificar" in self.view.hint_var.get()))
+            self.assertTrue(self.view.goto_visible)
+            # El fallo de un objeto que ya no se muestra no sustituye al que se ve.
+            self.app.navigate(self.desc)
+            self.go("base/broken · Health")
+            self.app.navigate(self.desc)
+            pump(self.app, lambda: False, timeout=0.3)
+            self.assertIs(self.view.document, self.document.bod(self.desc))
+            self.assertNotIn("no se pudo decodificar", self.hint())
+            self.go("Health")
+            self.assertEqual(self.selected_label(), "Health")
+
+    def test_two_fields_with_the_same_name(self) -> None:
+        self.go("base/twice · Twice")
+        self.assertEqual(self.view.selected()[1], (0,))
+        self.assertEqual(self.hint(), "Hay 2 campos «Twice» en la raíz: se eligió el primero")
+        self.view.reveal((2,))
+        self.assertEqual(self.hint(), "Doble clic o F2 para editar")
+
+    def test_a_correct_jump_clears_an_earlier_error(self) -> None:
+        for wrong, right in (("Stats.Crot", "Stats"), ("Zzz", "Stats"), ("Stats.Crot", "death/death_desc"),
+                             ("death/death_desc · Stats[9]", "death/death_desc · Stats")):
+            self.go(wrong)
+            self.assertIn("no", self.hint(), wrong)
+            self.go(right)
+            self.assertFalse(self.view.goto_visible)
+            self.assertNotEqual(self.view.hint_label.cget("style"), "HintError.TLabel", (wrong, right))
+            self.assertEqual(self.hint(), "Clic derecho: poner a nulo", (wrong, right))
+
+    def test_escape_keeps_a_warning_that_is_not_from_the_bar(self) -> None:
+        self.app.structure_action("duplicate", self.path("Lookup[0]"))
+        self.assertIn("La copia repite la clave", self.hint())
+        self.open_bar()
+        invoke_binding(self.view.goto_entry, "<Escape>")
+        self.assertIn("La copia repite la clave", self.hint())
+
+    def test_a_pending_search_does_not_move_the_jump(self) -> None:
+        self.view.search_name_var.set("Health")  # el recálculo espera 200 ms sin teclear
+        self.go("Stats.Damage")
+        self.assertIsNone(self.view._search_after)
+        pump(self.app, lambda: False, timeout=0.4)
+        self.assertEqual(self.selected_label(), "Stats.Damage")
+
+    def test_a_jump_after_decoding_does_not_take_the_focus(self) -> None:
+        for focus in ({"return_value": None}, {"side_effect": KeyError("popdown")}):
+            with self.decoding_in_a_thread():
+                self.document._bod_cache.pop(self.instance, None)
+                self.app.navigate(self.desc)
+                self.go("scripts/weaponbehavior_inst · Enabled")
+                self.focused.clear()
+                # Mientras se decodifica, el usuario pasa a otro campo (o abre un desplegable).
+                if "return_value" in focus:
+                    focus = {"return_value": self.view.search_name}
+                with mock.patch.object(self.view, "focus_get", **focus):
+                    self.assertTrue(pump(self.app, lambda: self.selected_label() == "Enabled"))
+                self.assertEqual(self.focused, [])
+                self.assertFalse(self.view.goto_visible)
+
+    def test_a_character_outside_the_basic_plane(self) -> None:
+        self.go("Stats.😀Crit")
+        self.assertEqual(self.marked(), "😀Crit")
+        self.go("😀 · Stats")  # el objeto que no existe, con el emoji dentro
+        self.assertEqual(self.marked(), "😀")
+        self.go("Pairs[0].😀.x")
+        self.assertEqual(self.marked(), "😀")
+
+    def test_a_failure_keeps_the_bar_and_explains_it(self) -> None:
+        self.go("Stats.Crot")
+        self.assertEqual(self.selected_label(), "Stats")
+        self.assertTrue(self.view.goto_visible)
+        self.assertEqual(self.marked(), "Crot")
+        self.assertEqual(self.hint(), "«Crot» no es un campo de Stats. Parecidos: «Crit»")
+        # La pista normal vuelve al elegir otra fila, o al cancelar con Escape.
+        self.view.reveal(self.view.selected()[1] + (0,))
+        self.assertEqual(self.hint(), "Doble clic o F2 para editar")
+        self.go("Stats.Damage.x")
+        self.assertIn("«x» no vale aquí", self.hint())
+        invoke_binding(self.view.goto_entry, "<Escape>")
+        self.assertEqual(self.hint(), "Doble clic o F2 para editar")
+        # Sin sintaxis de ruta o con un objeto que no existe, no se navega.
+        for text, marked, message in (
+            ("Stats[x]", "[x]", "Entre corchetes va un número"),
+            ("death/death_dsc · Health", "death/death_dsc", "Parecidos: «death/death_desc»"),
+        ):
+            self.go(text)
+            self.assertEqual((self.app.position, self.selected_label()), (self.desc, "Stats.Damage"), text)
+            self.assertEqual(self.marked(), marked)
+            self.assertIn(message, self.hint())
+        self.assertEqual(self.app.history_back, [])
+        # Sin objeto abierto, una ruta necesita el objeto delante.
+        self.app.set_document(self.document)
+        self.go("Stats.Damage")
+        self.assertIn("Selecciona antes un objeto", self.hint())
+        self.go("death/death_desc · Stats.Damage")
+        self.assertEqual(self.selected_label(), "Stats.Damage")
+
+    def test_ctrl_z_in_the_field_does_not_undo(self) -> None:
+        self.go("Health")
+        self.view.begin_edit()
+        self.view.editor.var.set("250")
+        self.view.editor.commit()
+        self.assertEqual(self.document.change_count, 1)
+        self.open_bar()
+        for sequence in ("<Control-z>", "<Control-y>", "<Control-p>"):
+            invoke_binding(self.app, sequence, self.view.goto_entry, everywhere=True)
+        self.assertEqual(self.document.change_count, 1)
+        self.assertIsNone(self.app.pending_window)
+        invoke_binding(self.app, "<Control-z>", self.view.tree, everywhere=True)
+        self.assertEqual(self.document.change_count, 0)
+
+    def test_the_clipboard_fills_the_field(self) -> None:
+        self.clipboard = "  Stats.Damage\n"
+        self.open_bar()
+        self.assertEqual(self.view.goto_var.get(), "Stats.Damage")
+        self.assertEqual(self.marked(), "Stats.Damage")
+        # Con la barra abierta, Ctrl+G no pisa lo que se escribe.
+        self.view.goto_var.set("Pairs")
+        self.clipboard = "Color[0]"
+        self.view.goto_entry.selection_clear()
+        self.view.reveal(self.path("Health"))
+        self.view.begin_edit()
+        self.open_bar()  # vuelve al campo, cancela la celda y selecciona lo escrito
+        self.assertEqual((self.view.goto_var.get(), self.marked()), ("Pairs", "Pairs"))
+        self.assertFalse(self.view.editing)
+        invoke_binding(self.view.goto_entry, "<KP_Enter>")  # el Intro del teclado numérico
+        self.assertEqual(self.selected_label(), "Pairs")
+        self.assertFalse(self.view.goto_visible)
+        # Lo que no parece una ruta deja el último texto usado.
+        for clipboard in ("350", "Jump", None, "C:\\Program Files (x86)\\Steam", "Stats.Damage\nColor[0]"):
+            self.clipboard = clipboard
+            self.open_bar()
+            self.assertEqual(self.view.goto_var.get(), "Pairs", clipboard)
+            self.view.hide_goto()
+        self.clipboard = "scripts/weaponbehavior_inst · Enabled"
+        self.open_bar()
+        self.assertEqual(self.view.goto_var.get(), "scripts/weaponbehavior_inst · Enabled")
+        # La lectura del portapapeles: vacío (o con una imagen, o bloqueado) da None, sin errores.
+        # Se simula clipboard_get para no tocar el portapapeles de quien ejecuta los tests.
+        with mock.patch.object(self.app, "clipboard_get", side_effect=tk.TclError("CLIPBOARD selection doesn't exist")):
+            self.assertIsNone(self.app._clipboard_text())
+        with mock.patch.object(self.app, "clipboard_get", return_value="Color[1]"):
+            self.assertEqual(self.app._clipboard_text(), "Color[1]")
+
+    def test_copy_full_path(self) -> None:
+        self.go("Stats.Damage")
+        copied: list[str] = []
+        self.view._copy = copied.append  # type: ignore[method-assign]
+        menu = self.view.context_menu(self.view.tree.selection()[0])
+        labels = [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)
+                  if menu.type(index) == "command"]
+        self.assertEqual(labels[-3:], ["Copiar valor", "Copiar ruta de la propiedad", "Copiar ruta completa"])
+        for label in ("Copiar ruta de la propiedad", "Copiar ruta completa"):
+            index = next(index for index in range(menu.index("end") + 1)
+                         if menu.type(index) == "command" and menu.entrycget(index, "label") == label)
+            menu.invoke(index)
+        self.assertEqual(copied[-2:], ["Stats.Damage", "death/death_desc · Stats.Damage"])
+        # La ruta completa lleva de vuelta desde otro objeto.
+        self.app.navigate(self.big)
+        self.go(copied[-1])
+        self.assertEqual((self.app.position, self.selected_label()), (self.desc, "Stats.Damage"))
+
+    def test_structure_hint_keeps_the_keys_capitalized(self) -> None:
+        self.go("Slots[0]")
+        self.assertTrue(self.hint().startswith("Ctrl+D duplica, Supr elimina, Alt+↑/↓ mueve"), self.hint())
 
 
 @requires_tk

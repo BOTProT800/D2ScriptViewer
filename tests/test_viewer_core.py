@@ -8,9 +8,11 @@ from __future__ import annotations
 import threading
 import time
 import unittest
+from unittest import mock
 
 from d2scriptviewer.binary import hex_dump
 from d2scriptviewer.document import Document
+from d2scriptviewer.errors import PathError
 from d2scriptviewer.formats import bod
 from d2scriptviewer.formats.hashes import name_hash
 from d2scriptviewer.references import Cancelled, Reference, ReferenceIndex, build_indexes, references_in
@@ -219,6 +221,238 @@ class TreeSearchTests(unittest.TestCase):
         self.assertEqual((bod.type_text(following), bod.value_text(following)), ("int32", "21"))
 
 
+def go(tree: bod.BodDocument, text: str) -> bod.PathMatch:
+    return bod.find_path(tree, bod.parse_path_label(text))
+
+
+class PathLabelInverseTests(unittest.TestCase):
+    """Ir a una ruta (fase 11): de la ruta legible de :func:`bod.path_label` a la ruta del árbol."""
+
+    def setUp(self) -> None:
+        self.document = Document.from_bytes(fixtures.make_obsp())
+        self.desc = self.document.bod(0)
+
+    def assert_reaches(self, tree: bod.BodDocument, text: str, label: str, note: str = "") -> bod.PathMatch:
+        match = go(tree, text)
+        self.assertIsNone(match.failed, match.message)
+        self.assertEqual(bod.path_label(tree, match.path), label)
+        self.assertEqual(match.message, note)
+        return match
+
+    def assert_stops(self, tree: bod.BodDocument, text: str, label: str, step: str, *messages: str) -> bod.PathMatch:
+        match = go(tree, text)
+        self.assertIsNotNone(match.failed)
+        self.assertEqual(bod.path_label(tree, match.path), label)
+        self.assertEqual(match.failed.text, step)
+        self.assertEqual(text[match.failed.start:match.failed.end], step)  # el tramo que señala la barra
+        for message in messages:
+            self.assertIn(message, match.message)
+        return match
+
+    def test_round_trip_in_every_row_of_the_fixture(self) -> None:
+        rows = 0
+        for info in self.document.objects:
+            tree = self.document.bod(info.position)
+            for path, _node in bod.walk(tree.root):
+                if not path:
+                    continue
+                rows += 1
+                label = bod.path_label(tree, path)
+                with self.subTest(objeto=info.path, ruta=label):
+                    self.assertEqual(go(tree, label), bod.PathMatch(path, None, ""))
+        self.assertGreater(rows, 80)
+
+    def test_child_is_children_without_the_list(self) -> None:
+        for tree in (self.desc, self.document.bod(2), fixtures.big_list_document()):
+            for _path, node in bod.walk(tree.root):
+                kids = bod.children(node)
+                self.assertEqual([bod.child(node, index) for index in range(len(kids))], kids)
+                for step in (len(kids), -len(kids) - 1):
+                    with self.assertRaises(IndexError):
+                        bod.child(node, step)
+                if kids:
+                    self.assertEqual(bod.child(node, -1), kids[-1])
+
+    def test_child_never_builds_the_list(self) -> None:
+        trees = (self.desc, self.document.bod(2), fixtures.big_list_document())
+        rows = [(tree, path, bod.path_label(tree, path)) for tree in trees for path, _ in bod.walk(tree.root) if path]
+        # bod.children construye la lista entera de hijos: recorrer una ruta con ella sería cuadrático.
+        with mock.patch.object(bod, "children", side_effect=AssertionError("children() en un recorrido")):
+            for tree, path, label in rows:
+                self.assertEqual(bod.path_label(tree, path), label)
+                parent = bod.resolve(tree, path[:-1])
+                self.assertIs(bod.get_slot(parent, path[-1]), bod.resolve(tree, path))
+                self.assertEqual(go(tree, label).path, path)
+
+    def test_pairs(self) -> None:
+        self.assert_reaches(self.desc, "Pairs[0].clave", "Pairs[0].clave")
+        self.assert_reaches(self.desc, "Pairs[1].valor", "Pairs[1].valor")
+        self.assert_reaches(self.desc, "Lookup[0].Clave", "Lookup[0].clave")
+        self.assert_reaches(self.desc, "Lookup[0]", "Lookup[0]")
+        self.assert_stops(self.desc, "Pairs[0].key", "Pairs[0]", "key", "es un par", ".clave y .valor")
+        self.assert_stops(self.desc, "Pairs[0][1]", "Pairs[0]", "[1]", "es un par")
+        self.assert_stops(self.desc, "Pairs[0].valor.x", "Pairs[0].valor", "x", "es un valor (cadena)")
+
+    def test_a_list_longer_than_a_chunk(self) -> None:
+        tree = fixtures.big_list_document()
+        for index in range(1200):
+            self.assertEqual(go(tree, bod.path_label(tree, (0, index))).path, (0, index))
+        self.assert_reaches(tree, "Values[ 0042 ]", "Values[42]")
+        self.assert_stops(tree, "Values[1200]", "Values", "[1200]", "1,200 elementos", "de [0] a [1199]")
+
+    def test_script(self) -> None:
+        tree = self.document.bod(2)
+        match = self.assert_reaches(tree, "Funciones.OnStart.0x0016", "Funciones.OnStart.0x0016")
+        self.assertEqual(bod.type_text(bod.resolve(tree, match.path)), "op_3A")
+        # Los desplazamientos se comparan por valor si el texto no coincide.
+        self.assert_reaches(tree, "funciones.onstart.0x16", "Funciones.OnStart.0x0016")
+        self.assert_stops(tree, "Funciones.OnStart.0x0017", "Funciones.OnStart", "0x0017",
+                          "no es el comienzo de ninguna instrucción", "la anterior es 0x0016")
+        # Etiquetas con espacios y con tildes, que se pueden escribir sin ellas.
+        self.assert_reaches(tree, "Valores iniciales.Speed", "Valores iniciales.Speed")
+        self.assert_reaches(tree, "Estados.Active.onEnter.Parametros", "Estados.Active.onEnter.Parámetros")
+        self.assert_reaches(tree, "Miembros.Stats.Damage", "Miembros.Stats.Damage")
+        self.assert_reaches(tree, "Miembros.Items[1]", "Miembros.Items[1]")
+
+    def test_case(self) -> None:
+        self.assert_reaches(self.desc, "stats.CRIT", "Stats.Crit")
+        self.assert_reaches(self.desc, "SLOTS[1].slotid", "Slots[1].SlotID")
+        root = bod.BodObject(None, fixtures.native("Functions"), [
+            fixtures.F("Activate", bod.Int32.of(1)),
+            fixtures.F("activate", bod.Int32.of(2)),
+            fixtures.F("Twice", bod.Int32.of(3)),
+            fixtures.F("Twice", bod.Int32.of(4)),
+        ])
+        tree = bod.BodDocument(4, 1, root)
+        # Primero el nombre exacto; sin él, sin mayúsculas solo si es único.
+        self.assert_reaches(tree, "activate", "activate")
+        self.assert_reaches(tree, "Activate", "Activate")
+        self.assert_stops(tree, "ACTIVATE", "(raíz)", "ACTIVATE", "puede ser «Activate» o «activate»")
+        # Dos campos que se llaman igual: el primero, con aviso, también sin mayúsculas.
+        for text in ("Twice", "twice"):
+            match = self.assert_reaches(tree, text, "Twice", "Hay 2 campos «Twice» en la raíz: se eligió el primero")
+            self.assertEqual(match.path, (2,))
+
+    def test_failures_stop_at_the_deepest_valid_node(self) -> None:
+        self.assert_stops(self.desc, "Stats.Dmg", "Stats", "Dmg", "«Dmg» no es un campo de Stats", "Parecidos: «Damage»")
+        self.assert_stops(self.desc, "Nada.Damage", "(raíz)", "Nada", "«Nada» no es un campo de la raíz")
+        self.assert_stops(self.desc, "Color[3]", "Color", "[3]", "Color tiene 3 elementos, de [0] a [2]")
+        self.assert_stops(self.desc, "Empty[0]", "Empty", "[0]", "Empty no tiene elementos")
+        self.assert_stops(self.desc, "Stats[0]", "Stats", "[0]", "es un objeto y sus campos van por nombre")
+        self.assert_stops(self.desc, "[0]", "(raíz)", "[0]", "la raíz es un objeto")
+        self.assert_stops(self.desc, "Tags.fire", "Tags", "fire", "es una lista", "se esperaba un índice")
+        self.assert_stops(self.desc, "Lookup.Health", "Lookup", "Health", "es un mapa")
+        self.assert_stops(self.desc, "Speed.x", "Speed", "x", "es un valor (float32) y no tiene hijos")
+        self.assert_stops(self.desc, "Slots[1].Count.x", "Slots[1].Count", "x", "es un valor (int32)")
+
+    def test_syntax(self) -> None:
+        for text in ("", "   ", "(raíz)", "(RAIZ)"):
+            self.assertEqual(bod.parse_path_label(text), [], text)
+        steps = bod.parse_path_label("  Slots [ 1 ] .  SlotID  ")
+        self.assertEqual([step.text for step in steps], ["Slots", "[1]", "SlotID"])
+        self.assertEqual([(step.start, step.end) for step in steps], [(2, 7), (8, 13), (17, 23)])
+        self.assertEqual(bod.parse_path_label("Color[" + "0" * 40 + "2]")[1].index, 2)
+        # Los nombres pueden llevar espacios (las etiquetas fijas de los scripts).
+        self.assertEqual([step.text for step in bod.parse_path_label("Valores iniciales.Speed")],
+                         ["Valores iniciales", "Speed"])
+        for text, span, message in (
+            ("Stats..Damage", (5, 6), "Falta un nombre de campo tras el «.»"),
+            ("Stats.", (5, 6), "Falta un nombre de campo"),
+            ("Stats[x]", (5, 8), "los índices por nombre no están disponibles"),
+            ("MoveStates[Jump]", (10, 16), "Entre corchetes va un número"),
+            ("Stats[]", (5, 7), "Falta el número"),
+            ("Stats[-1]", (5, 9), "Entre corchetes va un número"),
+            ("Tags[0", (4, 6), "Falta el «]»"),
+            ("Stats]", (5, 6), "Sobra un «]»"),
+            ("·Stats", (0, 1), "Una ruta empieza por un nombre de campo"),
+            ("Stats::Damage", (5, 6), "Se esperaba «.» o «[» antes de «:»"),
+            ("Stats[0]x", (8, 9), "Se esperaba «.» o «[» antes de «x»"),
+            ("Color[" + "9" * 5000 + "]", (5, 5007), "demasiado grande"),
+        ):
+            with self.subTest(text=text[:60]):
+                with self.assertRaises(PathError) as raised:
+                    bod.parse_path_label(text)
+                self.assertIn(message, str(raised.exception))
+                self.assertEqual((raised.exception.start, raised.exception.end), span)
+
+
+class LocationTests(unittest.TestCase):
+    """Rutas con el objeto delante (fase 11): ``objeto · propiedad``, ``objeto::propiedad`` y el objeto solo."""
+
+    def setUp(self) -> None:
+        self.document = Document.from_bytes(fixtures.make_obsp())
+        self.desc = self.document.find("death/death_desc")[0].position
+        self.table = self.document.find("base/char_test")[0].position
+
+    def locate(self, text: str) -> tuple[int | None, list[str]]:
+        location = self.document.parse_location(text)
+        return location.position, [step.text for step in location.steps]
+
+    def test_formats(self) -> None:
+        damage = (self.desc, ["Stats", "Damage"])
+        self.assertEqual(self.locate("death/death_desc · Stats.Damage"), damage)
+        self.assertEqual(self.locate("death/death_desc·Stats.Damage"), damage)
+        self.assertEqual(self.locate("  death/death_desc  ::  Stats.Damage "), damage)
+        # El espacio duro (al copiar de una web) y el tabulador cuentan como espacios.
+        self.assertEqual(self.locate("death/death_desc · Stats.Damage "), damage)
+        self.assertEqual(self.locate("death/death_desc\t·\tStats.Damage"), damage)
+        self.assertEqual(self.locate("DEATH\\Death_Desc · Stats.Damage"), damage)
+        # Comillas alrededor, como al copiar la ruta de un .md.
+        self.assertEqual(self.locate("`death/death_desc · Stats.Damage`"), damage)
+        self.assertEqual(self.locate("«Stats.Damage»"), (None, ["Stats", "Damage"]))
+        self.assertEqual(self.locate("Stats.Damage"), (None, ["Stats", "Damage"]))
+        # El objeto solo, con o sin separador.
+        self.assertEqual(self.locate("base/char_test"), (self.table, []))
+        self.assertEqual(self.locate("base/char_test ·"), (self.table, []))
+        self.assertEqual(self.locate("base/char_test · (raíz)"), (self.table, []))
+
+    def test_full_label_round_trip_in_every_row(self) -> None:
+        for info in self.document.objects:
+            tree = self.document.bod(info.position)
+            for path, _node in bod.walk(tree.root):
+                if not path:
+                    continue
+                label = self.document.full_label(info.position, path)
+                with self.subTest(ruta=label):
+                    self.assertTrue(label.startswith(f"{info.path} · "))
+                    location = self.document.parse_location(label)
+                    self.assertEqual(location.position, info.position)
+                    self.assertEqual(bod.find_path(tree, list(location.steps)), bod.PathMatch(path, None, ""))
+
+    def test_errors(self) -> None:
+        for text, span, message in (
+            ("", (0, 0), "Escribe una ruta"),
+            ("  ``  ", (0, 0), "Escribe una ruta"),
+            ("death/deth_desc · Health", (0, 15), "No hay ningún objeto «death/deth_desc». Parecidos: «death/death_desc»"),
+            (" · Health", (1, 2), "Falta el objeto antes de «·»"),
+            (":: Health", (0, 2), "Falta el objeto antes de «::»"),
+            ("death/death_desc.Stats.Damage", (0, 16), "sepáralos con « · »: death/death_desc · Stats.Damage"),
+            ("death/death_desc · Stats..Damage", (24, 25), "Falta un nombre de campo"),
+            ("Stats\nDamage", (5, 6), "una sola línea"),
+            ("Stats.​Damage", (6, 7), "un carácter invisible (U+200B)"),
+            ("﻿Stats.Damage", (0, 1), "un carácter invisible (U+FEFF)"),
+        ):
+            with self.subTest(text=text):
+                with self.assertRaises(PathError) as raised:
+                    self.document.parse_location(text)
+                self.assertIn(message, str(raised.exception))
+                self.assertEqual((raised.exception.start, raised.exception.end), span)
+
+    def test_looks_like_a_location(self) -> None:
+        self.document.bod(self.desc)  # el objeto abierto ya está decodificado
+        for text in ("Stats.Damage", "  Pairs[0].valor ", "Color[9]", "Stats.NoExiste", "death/death_desc",
+                     "base/char_test · Data[0]", "scripts/test::Funciones.OnStart"):
+            self.assertTrue(self.document.looks_like_location(text, self.desc), text)
+        for text in ("", "350", "1.5", "-1", "true", "Jump", "Health", "NoExiste.Damage", "hola mundo",
+                     "Stats.Damage\nStats.Crit", "Stats.Damage\tStats.Crit", "C:\\Program Files (x86)\\Steam",
+                     "media\\scripts.obsp", "https://github.com/BOTProT800/D2ScriptViewer", "death/no_existe",
+                     "death/death_desc.Stats", "Stats." + "x" * 300):
+            self.assertFalse(self.document.looks_like_location(text, self.desc), text)
+        # Una ruta sin objeto delante necesita un objeto abierto que tenga ese campo en la raíz.
+        self.assertFalse(self.document.looks_like_location("Stats.Damage", None))
+        self.assertFalse(self.document.looks_like_location("Stats.Damage", self.table))
+
+
 @requires_real_file
 class RealTreeSearchTests(unittest.TestCase):
     @classmethod
@@ -255,6 +489,74 @@ class RealTreeSearchTests(unittest.TestCase):
                 started = time.perf_counter()
                 find_in_tree(tree, ref_label=self.ref_label, **criteria)
                 self.assertLess(time.perf_counter() - started, 0.2)
+
+
+@requires_real_file
+class RealPathLabelTests(unittest.TestCase):
+    """Ir a una ruta (fase 11) con el archivo real."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.document = Document.from_bytes(real_bytes())
+
+    def test_round_trip_in_every_row(self) -> None:
+        document = self.document
+        trees = [(info, document.bod(info.position)) for info in document.objects]
+        started = time.perf_counter()
+        rows = 0
+        misses = []
+        for info, tree in trees:
+            for path, _node in bod.walk(tree.root):
+                if not path:
+                    continue
+                rows += 1
+                location = document.parse_location(document.full_label(info.position, path))
+                match = bod.find_path(tree, list(location.steps))
+                if location.position != info.position or match != bod.PathMatch(path, None, ""):
+                    misses.append((info.path, path, match.path, match.message))
+        elapsed = time.perf_counter() - started
+        self.assertEqual((len(trees), rows), (7_862, 1_145_518))
+        # La única fila a la que no se llega: el segundo de dos miembros con el mismo nombre.
+        note = "Hay 2 campos «StageThreeHealthPct» en Miembros: se eligió el primero"
+        self.assertEqual(misses, [
+            ("wailing_host/wailing_host", (6, 6), (6, 6), note),
+            ("wailing_host/wailing_host", (6, 7), (6, 6), note),
+        ])
+        # Medido: unos 19 s en Linux (16 µs por fila). El límite es una red de seguridad; que el
+        # recorrido no construya listas de hijos lo vigila test_child_never_builds_the_list.
+        self.assertLess(elapsed, 120, f"{elapsed:.1f} s para {rows:,} filas")
+
+    def test_paths_from_the_modder_guide(self) -> None:
+        document = self.document
+        for path, label, kind, value in (
+            ("death/playercommon_movestates", "MoveStates[44].JumpImpulse", "float32", "350"),
+            ("ui_core/pausemenu", "Funciones.onInit.0x004E", "bool", "true"),
+            ("base/quest_test_dialog", "Dialogs[0].Actions[1].FlagID", "cadena", "'flag_quest_debug_question_asked'"),
+        ):
+            info = document.object_by_path(path)
+            assert info is not None
+            tree = document.bod(info.position)
+            for text in (label, f"{path} · {label}", f"{path}::{label}", f"`{label}`"):
+                with self.subTest(text=text):
+                    location = document.parse_location(text)
+                    self.assertIn(location.position, (None, info.position))
+                    started = time.perf_counter()
+                    match = bod.find_path(tree, list(location.steps))
+                    self.assertLess(time.perf_counter() - started, 0.05)
+                    self.assertIsNone(match.failed, match.message)
+                    node = bod.resolve(tree, match.path)
+                    self.assertEqual((bod.path_label(tree, match.path), bod.type_text(node), bod.value_text(node)),
+                                     (label, kind, value))
+
+    def test_names_that_differ_only_in_case(self) -> None:
+        info = self.document.object_by_path("base/simpleinteractive")
+        assert info is not None
+        tree = self.document.bod(info.position)
+        for text in ("Funciones.Activate", "Funciones.activate"):
+            self.assertEqual(bod.path_label(tree, go(tree, text).path), text)
+        match = go(tree, "funciones.ACTIVATE")
+        self.assertEqual(bod.path_label(tree, match.path), "Funciones")
+        self.assertIn("puede ser «Activate» o «activate»", match.message)
 
 
 class HexDumpTests(unittest.TestCase):

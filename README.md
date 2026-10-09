@@ -59,6 +59,12 @@ el archivo.
   `op_3A` y Valor `NumSlots` encuentran las 7 asignaciones de `NumSlots`.
 - **Buscar en todo el archivo** (Ctrl+Mayús+F): rutas, nombres, clases, valores (texto o número)
   y símbolos.
+- **Ir a una ruta** (Ctrl+G o Ir → Ir a la ruta…): pega una ruta como
+  `MoveStates[44].JumpImpulse` y el árbol salta a esa fila, también dentro de los tramos de las
+  listas largas. Con el objeto delante (`death/playercommon_movestates · MoveStates[44].JumpImpulse`,
+  o con `::` en lugar de `·`) salta de objeto. Es lo que copian, con el clic derecho, «Copiar ruta
+  de la propiedad» y «Copiar ruta completa». Si la ruta falla a mitad, se queda en la última
+  fila válida y la línea bajo el árbol dice qué tramo falló, con los nombres parecidos.
 
 ### Editar
 

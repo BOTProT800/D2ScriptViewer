@@ -35,8 +35,9 @@ versión 1.0.0, ejecutable de Windows con PyInstaller 6.22.3 y workflow de relea
 local; el push, la visibilidad del repositorio y la etiqueta los decide el usuario. Las fases 0
 a 9 están cerradas. Fase 10 (búsqueda dentro del objeto) cerrada el 8 de octubre de 2026: una
 barra en el panel de propiedades con un campo por columna, Ctrl+F para el objeto y Ctrl+Mayús+F
-para la búsqueda global; sus dos tests con el archivo real (`RealTreeSearchTests`) pasan. Las
-decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+para la búsqueda global; sus dos tests con el archivo real (`RealTreeSearchTests`) pasan. Fase 11
+(ir a una ruta) cerrada el 9 de octubre de 2026: Ctrl+G abre una barra «Ir a» que lee la ruta de
+«Copiar ruta de la propiedad» o `objeto · propiedad` y salta a esa fila. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -79,7 +80,10 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
 ## Mapa del código
 
 - `d2scriptviewer/formats/`: `obsp.py` (contenedor y escritor), `bod.py` (árbol, codificador
-  canónico, recorrido y presentación; `Note` es una fila de solo lectura), `script.py` (script
+  canónico, recorrido y presentación; `Note` es una fila de solo lectura; `child` da un hijo sin
+  construir la lista entera; `parse_path_label` y `find_path`, la inversa de `path_label` de la
+  fase 11: tramo a tramo, nombre exacto y si no sin mayúsculas ni tildes y único, `0x…` por valor,
+  y el nodo válido más profundo con el motivo si falla), `script.py` (script
   completo: cabecera, miembros, valores iniciales, funciones y estados; `parse`, `encode`,
   `only_literals_changed` y `present`, el árbol de presentación enlazado al script),
   `bytecode.py` (tabla de 57 opcodes, `disassemble`/`assemble`, número de argumentos), `hashes.py`
@@ -93,6 +97,10 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   su hash calculado), avisos de identificador y de cadena nueva, y operaciones
   reversibles (`ValueEdit`, `InsertItem`, `RemoveItem`, `MoveItem`, `ReplaceValue`,
   `ReplaceTree`, agrupadas en `EditGroup`). Las rutas valen porque deshacer y rehacer son LIFO.
+- `document.py` (fase 11): `parse_location` analiza `propiedad`, `objeto · propiedad`,
+  `objeto::propiedad` o el objeto solo, sin resolver la propiedad (necesita el árbol, que puede
+  estar decodificándose); `full_label` da `objeto · propiedad`; `looks_like_location` decide si el
+  portapapeles parece una ruta. Los errores son `PathError`, con el tramo culpable (`start`, `end`).
 - `document.py`: un objeto está **modificado si sus bytes difieren** de los de partida; nada de
   originales por ruta (las rutas se desplazan al insertar o quitar). `changes()` compara el árbol
   actual con `baseline_tree()` mediante `diffing.py` (alineamiento por huellas y LCS).
@@ -124,17 +132,21 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   `--autoprueba`), `D2ScriptViewer.spec` la receta de PyInstaller (copia a `build\licencias` los
   textos de licencia de terceros y `VERSIONES.txt`) y `THIRD_PARTY_NOTICES.md` los explica.
   `.github/workflows/release.yml` publica la release con una etiqueta `v*`.
-- `gui/`: `app.py` (ventana, hilos, navegación, edición), `object_tree.py`, `property_view.py`
+- `gui/`: `app.py` (ventana, hilos, navegación, edición; `go_to_location` resuelve Ctrl+G, también
+  tras decodificar en un hilo, con `_pending_location`), `object_tree.py`, `property_view.py`
   (árbol perezoso con tramos de 500, y la barra de búsqueda del objeto: recalcula en `show_bod` y
-  `set_edited` sin mover la selección y navega con `reveal`),
+  `set_edited` sin mover la selección y navega con `reveal`; la barra «Ir a» y la pista retenida,
+  `set_hint(..., hold=True)`, que la selección encolada de un salto no pisa),
   `editors.py` (editor en la celda, selector de referencias y `FillNullDialog`), `pending_view.py`, `details.py`,
   `script_view.py`, `search_view.py`, `theme.py`. Los hilos solo encolan mensajes;
   `_poll_messages` los atiende en el hilo de Tk. Las confirmaciones y avisos pasan por `app.ask`,
-  `app.ask_save`, `app.inform` y `app.alert`, que los tests sustituyen.
+  `app.ask_save`, `app.inform` y `app.alert`, y el portapapeles por `app.read_clipboard`: los
+  tests los sustituyen.
 - `tests/fixtures.py`: OBSP sintético con los 11 tags y hashes reales; `tests/support.py`: archivo real;
   `tests/test_gui.py`: humo de la GUI (se omite sin Tk). Las ventanas van ocultas y Tk descarta
   ahí las teclas sintéticas, así que los atajos se prueban con `invoke_binding`, que llama al
-  callback del enlace.
+  callback del enlace. `<<TreeviewSelect>>` llega por la cola de eventos: un test de la pista
+  llama antes a `update()`.
 - `research/FORMATO.md`: hallazgos de formato fuera del apéndice A.
 - `GUIA_MODDER.md`: atajos de teclado y qué se suele modificar. Si cambias un atajo, un menú o
   una prueba en el juego, actualízala en el mismo cambio.

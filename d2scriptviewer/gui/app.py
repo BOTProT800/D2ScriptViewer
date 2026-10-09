@@ -23,9 +23,9 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 from .. import __version__, edits, export, patches, saving
-from ..document import Document
+from ..document import Document, Location
 from ..edits import EditGroup
-from ..errors import D2ScriptViewerError, EditError
+from ..errors import D2ScriptViewerError, EditError, PathError
 from ..formats import bod, script
 from ..formats.obsp import identity_text
 from ..references import Cancelled, FileIndexes, build_indexes, references_in, slot_key
@@ -78,7 +78,12 @@ class ViewerApp(tk.Tk):
         #: Avisos informativos (resumen del primer guardado); también sustituibles.
         self.inform: Callable[[str, str], None] = lambda title, message: messagebox.showinfo(title, message, parent=self)
         self.alert: Callable[[str, str], None] = lambda title, message: messagebox.showerror(title, message, parent=self)
+        #: Texto del portapapeles o ``None``; los tests lo sustituyen para no depender del sistema.
+        self.read_clipboard: Callable[[], "str | None"] = self._clipboard_text
         self.saving = False
+        #: Objeto que se está decodificando en un hilo, y la ruta pedida mientras tanto (fase 11).
+        self._decoding: int | None = None
+        self._pending_location: tuple[int, Location] | None = None
         self._after_save: Callable[[], None] | None = None
         self._game_save_confirmed: set[Path] = set()
         #: Segundos que tardó en mostrarse el último objeto (para medir el criterio < 1 s).
@@ -155,6 +160,8 @@ class ViewerApp(tk.Tk):
         go_menu = tk.Menu(menubar, tearoff=False)
         go_menu.add_command(label="Atrás", accelerator="Alt+Izquierda", command=self.go_back)
         go_menu.add_command(label="Adelante", accelerator="Alt+Derecha", command=self.go_forward)
+        go_menu.add_separator()
+        go_menu.add_command(label="Ir a la ruta…", accelerator="Ctrl+G", command=self.open_goto)
         menubar.add_cascade(label="Ir", menu=go_menu)
 
         help_menu = tk.Menu(menubar, tearoff=False)
@@ -168,6 +175,8 @@ class ViewerApp(tk.Tk):
         self.bind_all("<Control-S>", lambda _event: self.save_as() or "break")
         self.bind_all("<Control-f>", self._on_find_key)
         self.bind_all("<Control-F>", lambda _event: self.open_search() or "break")
+        self.bind_all("<Control-g>", self._on_goto_key)
+        self.bind_all("<Control-G>", self._on_goto_key)
         self.bind_all("<Alt-Left>", lambda _event: self.go_back())
         self.bind_all("<Alt-Right>", lambda _event: self.go_forward())
         for sequence, action in (
@@ -218,6 +227,9 @@ class ViewerApp(tk.Tk):
             on_structure=self.structure_action,
             hint=self.edit_hint,
             suggest=self.suggest_names,
+            on_goto=self.go_to_location,
+            on_goto_cancel=self.cancel_goto,
+            full_label=self.full_label,
         )
         self.details = DetailsPanel(pane, on_navigate=self.navigate)
         pane.add(self.object_tree, weight=3)
@@ -373,6 +385,10 @@ class ViewerApp(tk.Tk):
             self.pending_window.destroy()
         self.pending_window = None
         self.object_tree.set_document(document)
+        self._decoding = None
+        self._pending_location = None
+        if self.property_view.goto_visible:
+            self.property_view.hide_goto()
         self.property_view.show_message("", "Selecciona un objeto en el panel de la izquierda.")
         self.details.clear()
         self.details.set_indexes(None)
@@ -451,7 +467,7 @@ class ViewerApp(tk.Tk):
             return
         self.navigate(info.position)
 
-    def navigate(self, position: int, path: tuple | None = None, *, record: bool = True) -> None:
+    def navigate(self, position: int, path: tuple | Location | None = None, *, record: bool = True) -> None:
         if self.document is None:
             return
         if record and self.position is not None and position != self.position:
@@ -481,43 +497,63 @@ class ViewerApp(tk.Tk):
         info = self.document.objects[position]
         return f"{info.path}   ·   {info.class_name or info.kind_label}"
 
-    def _show_object(self, position: int, path: tuple | None) -> None:
+    def _show_object(self, position: int, path: tuple | Location | None) -> None:
         assert self.document is not None
         document = self.document
         info = document.objects[position]
         self._display_started = time.perf_counter()
+        self._decoding = None
+        self._pending_location = None
         title = self._object_title(position)
         if document.cached_bod(position) is not None or info.entry.size <= SYNC_DECODE_LIMIT:
             self._display_bod(position, path)
             return
         self.property_view.show_message(title, f"Decodificando {theme.human_size(info.entry.size)}…")
         self.details.show(document, info)
+        self._decoding = position
+        if isinstance(path, Location):
+            # Si la decodificación falla, la barra «Ir a» tiene que enterarse.
+            self._pending_location, path = (position, path), None
         self._spawn("decode", lambda: (position, path, document.bod(position)))
 
     def _on_decode(self, token: int, payload: object) -> None:
         if token != self.tokens["decode"]:
             return
+        decoding, self._decoding = self._decoding, None
         if isinstance(payload, BaseException):
+            if decoding is None or decoding != self.position:
+                return  # el fallo es de un objeto que ya no se muestra
+            pending, self._pending_location = self._pending_location, None
             if self.position is not None and self.document is not None:
                 self.property_view.show_message(self._object_title(self.position), f"No se pudo decodificar: {payload}")
+                if pending is not None:
+                    self.property_view.goto_failed("Este objeto no se pudo decodificar: no tiene propiedades a las que ir")
             return
         position, path, _tree = payload  # type: ignore[misc]
         if position == self.position:
             self._display_bod(position, path)
 
-    def _display_bod(self, position: int, path: tuple | None) -> None:
+    def _display_bod(self, position: int, path: tuple | Location | None) -> None:
         assert self.document is not None
         document = self.document
         info = document.objects[position]
         title = self._object_title(position)
+        # Una ruta de «Ir a» pedida durante la decodificación es posterior a la de la navegación.
+        if self._pending_location is not None and self._pending_location[0] == position:
+            path = self._pending_location[1]
+        self._pending_location = None
         try:
             tree = document.bod(position)
         except D2ScriptViewerError as error:
             self.property_view.show_message(title, f"No se pudo decodificar: {error}")
             self.details.show(document, info)
+            if isinstance(path, Location):
+                self.property_view.goto_failed(f"Este objeto no se pudo decodificar: {error}")
             return
         self.property_view.show_bod(title, tree, document.edited_paths(position))
-        if path:
+        if isinstance(path, Location):
+            self._reveal_location(position, path)
+        elif path:
             self.property_view.reveal(path)
         self._show_details(position)
         self._finish_display()
@@ -606,7 +642,7 @@ class ViewerApp(tk.Tk):
         document, position = self.document, self.position
         if document is None or position is None or not isinstance(node, bod.ExternalRef) or self.saving:
             return
-        title = f"{document.objects[position].label()} · {document.property_label(position, path)}"
+        title = document.full_label(position, path)
         identity = ReferencePicker(self, document, node.identity, title).choose()
         if identity is None:
             return
@@ -680,7 +716,7 @@ class ViewerApp(tk.Tk):
         if action == "duplicate" and isinstance(container, (bod.BodMap, bod.BodList)) and container.mode == bod.MODE_PAIRS:
             self.property_view.set_hint(
                 "La copia repite la clave de la entrada original: cámbiala antes de guardar (una clave repetida "
-                "impide guardar).", "warn"
+                "impide guardar).", "warn", hold=True,
             )
 
     def fill_null(self, path: tuple) -> None:
@@ -694,7 +730,7 @@ class ViewerApp(tk.Tk):
         key = slot_key(tree, path)
         classes = self.indexes.slots.classes(key)
         references = self.indexes.slots.references(key)
-        title = f"{document.objects[position].label()} · {document.property_label(position, path)}"
+        title = document.full_label(position, path)
         if not classes and not references:
             self.inform(APP_NAME, f"En el archivo no aparece ningún objeto ni referencia en el hueco "
                                   f"{key[0]}.{key[1]}, así que no hay de dónde copiar uno con seguridad.")
@@ -1144,10 +1180,13 @@ class ViewerApp(tk.Tk):
 
     # --- Búsqueda ------------------------------------------------------------------------
 
-    def _on_find_key(self, event: tk.Event) -> str | None:
-        # Ctrl+F en otra ventana (la búsqueda global, un diálogo) no salta a la principal.
+    def _from_main_window(self, event: tk.Event) -> bool:
+        """Si la tecla llegó a la ventana principal: en otra (la búsqueda global, un diálogo) no salta a ella."""
         widget = event.widget
-        if not isinstance(widget, tk.Misc) or widget.winfo_toplevel() is not self:
+        return isinstance(widget, tk.Misc) and widget.winfo_toplevel() is self
+
+    def _on_find_key(self, event: tk.Event) -> str | None:
+        if not self._from_main_window(event):
             return None
         self.focus_object_search()
         return "break"
@@ -1164,6 +1203,88 @@ class ViewerApp(tk.Tk):
             self.search_window.focus_set()
             return
         self.search_window = SearchWindow(self, self.document, self.navigate)
+
+    # --- Ir a una ruta (fase 11) -----------------------------------------------------------
+
+    def _on_goto_key(self, event: tk.Event) -> str | None:
+        if not self._from_main_window(event):
+            return None
+        self.open_goto()
+        return "break"
+
+    def _clipboard_text(self) -> str | None:
+        try:
+            return self.clipboard_get()
+        except tk.TclError:  # vacío, con una imagen o archivos, o bloqueado por otro programa
+            return None
+
+    def open_goto(self) -> None:
+        """Ctrl+G: la barra «Ir a», rellena con el portapapeles si parece una ruta.
+
+        Con la barra ya abierta solo vuelve a ella, sin pisar lo escrito.
+        """
+        if self.document is None:
+            self.status_var.set("Abre antes un scripts.obsp con Archivo → Abrir (Ctrl+O)")
+            return
+        view = self.property_view
+        if view.goto_visible:
+            view.show_goto()
+            return
+        clipboard = self.read_clipboard()
+        if clipboard is not None and self.document.looks_like_location(clipboard, self.position):
+            view.show_goto(clipboard.strip())
+        else:
+            view.show_goto()
+
+    def full_label(self, path: tuple) -> str:
+        """``objeto · propiedad`` de una fila del objeto abierto (Copiar ruta completa)."""
+        assert self.document is not None and self.position is not None
+        return self.document.full_label(self.position, path)
+
+    def go_to_location(self, text: str) -> None:
+        """Intro en la barra «Ir a»: analiza la ruta y va a ella, quizá en otro objeto."""
+        document = self.document
+        view = self.property_view
+        if document is None:
+            return
+        self._pending_location = None  # solo cuenta la última petición
+        try:
+            location = document.parse_location(text)
+        except PathError as error:
+            view.goto_failed(str(error), error.start, error.end)
+            return
+        position = self.position if location.position is None else location.position
+        if position is None:
+            view.goto_failed("Selecciona antes un objeto, o escribe el objeto delante: objeto · propiedad")
+            return
+        if position != self.position:
+            self.navigate(position, location)
+        elif view.document is not None:
+            self._reveal_location(position, location)
+        elif self._decoding == position:
+            self._pending_location = (position, location)
+        else:
+            view.goto_failed("Este objeto no se pudo decodificar: no tiene propiedades a las que ir")
+
+    def cancel_goto(self) -> None:
+        """Escape en la barra «Ir a»: un salto que espera a la decodificación ya no se hace."""
+        self._pending_location = None
+
+    def _reveal_location(self, position: int, location: Location) -> None:
+        """Selecciona la fila de ``location`` en el objeto mostrado o, si falla, la más profunda válida."""
+        assert self.document is not None
+        view = self.property_view
+        view.flush_search()
+        if not location.steps:
+            view.goto_done()
+            return
+        match = bod.find_path(self.document.bod(position), list(location.steps))
+        if match.path:
+            view.reveal(match.path)
+        if match.failed is None:
+            view.goto_done(match.message)
+        else:
+            view.goto_failed(match.message, match.failed.start, match.failed.end)
 
     # --- Cierre --------------------------------------------------------------------------
 

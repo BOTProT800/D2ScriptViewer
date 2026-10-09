@@ -27,12 +27,13 @@ trabajar con la herramienta día a día.
 | Ctrl+P | Cambios pendientes (antes → después de cada propiedad) |
 | Ctrl+F | Buscar en el objeto abierto: lleva a la barra sobre las propiedades |
 | Ctrl+Mayús+F | Buscar en todo el archivo |
+| Ctrl+G | Ir a una ruta: abre la barra «Ir a» sobre las propiedades (también en Ir → Ir a la ruta…) |
 | Alt+← | Atrás en el historial de navegación |
 | Alt+→ | Adelante en el historial de navegación |
 
 Ctrl+Z, Ctrl+Y y Ctrl+P no actúan mientras escribes en un campo de texto (un filtro, la barra
-de búsqueda, la celda que editas…): ahí las teclas son del propio campo. Sal del campo para
-deshacer cambios del archivo.
+de búsqueda, la barra «Ir a», la celda que editas…): ahí las teclas son del propio campo. Sal del
+campo para deshacer cambios del archivo.
 
 Los menús no tienen letras subrayadas. Las acciones sin atajo están en ellos: Archivo →
 Restaurar original…, Exportar a JSON y CSV…, Exportar parche…, Aplicar parche…, y Editar →
@@ -61,7 +62,7 @@ categoría del objeto.
 | Intro | En un valor: editarlo. En una referencia (`→ …`): ir a su destino. En un contenedor: desplegar o plegar |
 | F2 | Editar el valor. En una referencia: abrir el selector para cambiar su destino |
 | Doble clic | Igual que Intro |
-| Clic derecho | Menú: ir al destino, editar, revertir la propiedad, estructura, copiar valor y copiar ruta |
+| Clic derecho | Menú: ir al destino, editar, revertir la propiedad, estructura, copiar valor, copiar la ruta de la propiedad y copiar la ruta completa |
 | Ctrl+D | Duplicar el elemento de lista o la entrada de mapa (la copia queda justo detrás) |
 | Supr | Eliminar el elemento o la entrada |
 | Alt+↑ / Alt+↓ | Subir o bajar el elemento dentro de su lista |
@@ -73,7 +74,9 @@ categoría del objeto.
 - La línea bajo el árbol explica por qué una fila no se puede editar y, mientras escribes, avisa
   de errores y muestra cómo quedará el valor.
 - **Copiar ruta de la propiedad** (clic derecho) da algo como `MoveStates[44].JumpImpulse`: es
-  la forma más cómoda de anotar qué cambiaste.
+  la forma más cómoda de anotar qué cambiaste. **Copiar ruta completa** pone el objeto delante:
+  `death/playercommon_movestates · MoveStates[44].JumpImpulse`. Las dos se pegan en Ctrl+G para
+  volver a esa fila.
 
 ### Búsqueda en el objeto (barra sobre las propiedades)
 
@@ -100,6 +103,37 @@ objeto abierto, también dentro de los nodos y tramos que no has desplegado.
 | ‹ / › | Lo mismo con el ratón |
 | F2 | Editar la fila seleccionada, como en el árbol |
 | Escape | Volver al árbol (las flechas se mueven desde el resultado) |
+
+### Ir a una ruta (barra «Ir a» sobre las propiedades)
+
+Ctrl+G abre una barra entre la de búsqueda y el árbol. Escribe o pega una ruta y pulsa Intro: el
+árbol se abre hasta esa fila y la selecciona, también dentro de los tramos de las listas largas
+(`[1000…1499]`).
+
+- **Formatos:**
+  - `MoveStates[44].JumpImpulse`: una fila del objeto abierto, como la da «Copiar ruta de la
+    propiedad». En los scripts, `Funciones.onInit.0x004E`.
+  - `death/playercommon_movestates · MoveStates[44].JumpImpulse`: salta a ese objeto y a esa
+    fila. Si tu teclado no tiene `·`, vale `::` (`death/playercommon_movestates::MoveStates[44].JumpImpulse`).
+    Alt+← vuelve al objeto anterior.
+  - `death/death`: abre el objeto.
+- **Al abrir la barra**, si el portapapeles contiene algo que parece una ruta, ya aparece escrito
+  y seleccionado. Si no, queda la última ruta que usaste.
+- **Mayúsculas y tildes:** primero se busca el nombre exacto. Si no está, se acepta sin distinguir
+  mayúsculas ni tildes (`movestates[44].jumpimpulse`, `Parametros`), siempre que solo haya una
+  posibilidad. En los scripts, `0x4e` vale como `0x004E`.
+- **Si la ruta falla a mitad**, el árbol se queda en la última fila válida, la barra sigue abierta
+  con el tramo que falló seleccionado y la línea bajo el árbol dice por qué: los nombres parecidos
+  («`JumpImpuls` no es un campo de MoveStates[44]. Parecidos: `JumpImpulse`»), cuántos elementos
+  tiene la lista o qué se esperaba. Si el objeto no existe, no se mueve nada y se sugieren los
+  objetos de nombre parecido.
+- Los índices son números: `MoveStates[Jump]` (por el `Name` del elemento) no está disponible.
+
+| Tecla | Acción |
+|---|---|
+| Ctrl+G | Abrir la barra o volver a ella (cancela la celda que editabas) |
+| Intro | Ir a la ruta. Si llega, la barra se cierra y el foco pasa al árbol: F2 edita la fila |
+| Escape | Cerrar la barra y volver al árbol; si el objeto aún se estaba abriendo, ya no salta a la fila |
 
 ### Editor en la celda
 
@@ -188,6 +222,11 @@ guarda la partida mientras un cambio lo tiene en mal estado, esa partida puede q
 | Estructura de una lista | `death/playercommon_movestates` | Duplicar `MoveStates[0]` (Ctrl+D) | — | El juego carga la lista más larga sin problemas |
 | Texto sin hash más largo | `base/quest_test_dialog` (`DialogSet`) | `Dialogs[0].Actions[1].FlagID` | +5 caracteres | El archivo cambia de tamaño y el juego lo carga |
 
+Las rutas de la columna Propiedad se pueden pegar en Ctrl+G con el objeto abierto, o con el
+objeto delante: `death/playercommon_movestates · MoveStates[44].JumpImpulse`,
+`ui_core/pausemenu · Funciones.onInit.0x004E` o `base/quest_test_dialog · Dialogs[0].Actions[1].FlagID`.
+En `Animations[n].AnimationName`, cambia `n` por el índice de la animación.
+
 Lo que enseñan esas pruebas:
 
 - **Busca los elementos de una lista por su `Name`, no por su índice.** Duplicar `MoveStates[0]`
@@ -212,7 +251,7 @@ cambiarlo.
 2. Ctrl+F. En **Tipo**, escribe o elige `op_3A`; en **Valor**, escribe `NumSlots`. El contador
    dice «1 de 7».
 3. Son las siete filas `op_3A NumSlots` de `Funciones.onInit`, de `0x0770` a `0x0A4A`. Intro
-   las recorre.
+   las recorre. También se llega a la primera con Ctrl+G y `death/death · Funciones.onInit.0x0770`.
 4. El número está en la fila de debajo de cada una (Escape y ↓): un `int32` que vale 21, 21, 21,
    22, 22, 22 y 21. Es un literal del código, así que F2 lo cambia sin alterar el tamaño del
    script.
@@ -243,6 +282,8 @@ Categorías del archivo (columna «Tipo» de la lista de objetos y filtro **Tipo
 
 ### Cómo encontrar lo que quieres cambiar
 
+- **Por su ruta.** Si ya sabes la ruta (de tus notas, de esta guía o de un parche), Ctrl+G y
+  pégala.
 - **Por nombre de campo.** Ctrl+Mayús+F, marca «Nombres de campo» y escribe un término en inglés
   del concepto. `Jump` lleva a `JumpImpulse`; prueba otros que se te ocurran. Si no hay
   resultados, no hay ningún campo con ese texto.

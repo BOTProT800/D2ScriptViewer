@@ -21,6 +21,8 @@ pendientes se obtienen comparando el árbol actual con el de partida
 
 from __future__ import annotations
 
+import difflib
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -28,7 +30,7 @@ from typing import Callable
 from . import diffing, edits
 from .diffing import Change
 from .edits import EditGroup, InsertItem, MoveItem, RemoveItem, ReplaceTree, ReplaceValue, State, ValueEdit
-from .errors import EditError
+from .errors import EditError, PathError
 from .formats import bod, script
 from .formats.hashes import HashDictionary
 from .formats.obsp import STEAM_ORIGINAL_SHA256, IndexEntry, ObspFile, identity_text, kind_name, rebuild
@@ -59,6 +61,73 @@ class ObjectInfo:
 
     def label(self) -> str:
         return self.path or self.name or identity_text(self.entry.group, self.entry.object_id)
+
+
+#: Lo que se escribe entre el objeto y la propiedad en una ruta completa.
+FULL_LABEL_SEPARATOR = " · "
+#: Separadores que se aceptan al leer una ruta completa; ninguna ruta ni etiqueta los contiene.
+LOCATION_SEPARATORS = ("·", "::")
+#: El portapapeles más largo que se considera una ruta (la más larga del juego mide 184).
+MAX_LOCATION_LENGTH = 256
+#: Comillas que se quitan si envuelven la ruta (al copiarla de un ``.md``).
+_QUOTES = {'"': '"', "'": "'", "`": "`", "«": "»", "“": "”"}
+
+
+@dataclass(frozen=True)
+class Location:
+    """Una ruta legible analizada (fase 11), todavía sin resolver en el árbol."""
+
+    position: int | None
+    """El objeto escrito delante de la propiedad; ``None`` si la ruta es del objeto abierto."""
+    steps: tuple[bod.PathStep, ...]
+    """Los tramos de la propiedad (:func:`.formats.bod.parse_path_label`); vacío, el objeto entero."""
+
+
+#: Saltos de línea: una ruta ocupa una sola.
+_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+
+
+def _check_characters(text: str, start: int, end: int) -> None:
+    """Rechaza los saltos de línea y los caracteres invisibles, señalando el primero.
+
+    Los espacios de cualquier tipo (también el duro, U+00A0, y el tabulador) cuentan como espacios.
+    """
+    for index in range(start, end):
+        char = text[index]
+        if char in _LINE_BREAKS:
+            raise PathError("Una ruta ocupa una sola línea", index, index + 1)
+        if not char.isspace() and unicodedata.category(char) in ("Cc", "Cf", "Co", "Cs", "Cn"):
+            raise PathError(f"La ruta lleva un carácter invisible (U+{ord(char):04X}): bórralo", index, index + 1)
+
+
+def _path_key(text: str) -> str:
+    return text.strip().replace("\\", "/").casefold()
+
+
+def _strip_span(text: str, start: int, end: int) -> tuple[int, int]:
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return start, end
+
+
+def _unwrap(text: str) -> tuple[int, int]:
+    """(inicio, fin) de ``text`` sin espacios ni comillas alrededor."""
+    start, end = _strip_span(text, 0, len(text))
+    while end - start >= 2 and _QUOTES.get(text[start]) == text[end - 1]:
+        start, end = _strip_span(text, start + 1, end - 1)
+    return start, end
+
+
+def _find_separator(text: str, start: int, end: int) -> tuple[int, int] | None:
+    """El primer separador entre objeto y propiedad dentro de ``text[start:end]``."""
+    found = [
+        (index, index + len(separator))
+        for separator in LOCATION_SEPARATORS
+        if (index := text.find(separator, start, end)) >= 0
+    ]
+    return min(found) if found else None
 
 
 def _text(obsp: ObspFile, value_hash: int) -> str:
@@ -97,6 +166,9 @@ class Document:
             for position, entry in enumerate(obsp.entries)
         ]
         self._by_identity = {info.identity: info for info in self.objects}
+        self._by_path: dict[str, ObjectInfo] = {}
+        for info in self.objects:
+            self._by_path.setdefault(_path_key(info.path), info)
 
     def mark_saved(self, data: bytes, path: Path) -> None:
         """El archivo recién escrito pasa a ser la base: ya no hay cambios pendientes.
@@ -223,8 +295,81 @@ class Document:
     def property_label(self, position: int, path: tuple) -> str:
         return bod.path_label(self.bod(position), path)
 
-    def _label(self, position: int, path: tuple) -> str:
-        return f"{self.objects[position].label()} · {self.property_label(position, path)}"
+    def full_label(self, position: int, path: tuple) -> str:
+        """``objeto · propiedad``: lo que copia «Copiar ruta completa» y lee :meth:`parse_location`."""
+        return f"{self.objects[position].label()}{FULL_LABEL_SEPARATOR}{self.property_label(position, path)}"
+
+    # --- Ir a una ruta (fase 11) ----------------------------------------------------------
+
+    def object_by_path(self, text: str) -> ObjectInfo | None:
+        """El objeto de esa ruta, sin distinguir mayúsculas y con «\\» o «/» como separador."""
+        return self._by_path.get(_path_key(text))
+
+    def parse_location(self, text: str) -> Location:
+        """Analiza una ruta legible sin resolver la propiedad, que necesita el árbol decodificado.
+
+        Formatos: ``propiedad`` (la de :func:`.formats.bod.path_label`, en el objeto abierto),
+        ``objeto · propiedad`` u ``objeto::propiedad``, y el ``objeto`` solo. Se quitan las
+        comillas que envuelvan el texto. Lanza :class:`PathError` con el tramo culpable.
+        """
+        start, end = _unwrap(text)
+        if start == end:
+            raise PathError(
+                "Escribe una ruta, como MoveStates[44].JumpImpulse, o el objeto delante: "
+                "death/playercommon_movestates · MoveStates[44].JumpImpulse"
+            )
+        _check_characters(text, start, end)
+        separator = _find_separator(text, start, end)
+        if separator is not None:
+            separator_start, separator_end = separator
+            object_start, object_end = _strip_span(text, start, separator_start)
+            if object_start == object_end:
+                raise PathError(f"Falta el objeto antes de «{text[separator_start:separator_end]}»",
+                                separator_start, separator_end)
+            info = self._object_in(text, object_start, object_end)
+            return Location(info.position, tuple(bod.parse_path_label(text, separator_end, end)))
+        steps = bod.parse_path_label(text, start, end)
+        first = steps[0] if steps else None
+        if first is not None and first.name is not None and ("/" in first.name or "\\" in first.name):
+            if len(steps) > 1:
+                rest = text[steps[1].start:end].strip()
+                raise PathError(
+                    f"Para ir a una propiedad de otro objeto, sepáralos con « · »: {first.name}{FULL_LABEL_SEPARATOR}{rest}",
+                    first.start, first.end,
+                )
+            return Location(self._object_in(text, first.start, first.end).position, ())
+        return Location(None, tuple(steps))
+
+    def _object_in(self, text: str, start: int, end: int) -> ObjectInfo:
+        info = self.object_by_path(text[start:end])
+        if info is not None:
+            return info
+        key = _path_key(text[start:end])
+        similar = difflib.get_close_matches(key, list(self._by_path), n=bod.SUGGESTIONS, cutoff=0.6)
+        hint = f". Parecidos: {', '.join(f'«{self._by_path[path].path}»' for path in similar)}" if similar else ""
+        raise PathError(f"No hay ningún objeto «{text[start:end].strip()}»{hint}", start, end)
+
+    def looks_like_location(self, text: str, position: int | None) -> bool:
+        """Si ``text`` (el portapapeles) parece una ruta a la que ir desde el objeto ``position``.
+
+        Una sola línea de hasta :data:`MAX_LOCATION_LENGTH` caracteres, con la sintaxis de
+        :meth:`parse_location` y alguno de ``.``, ``[``, ``·``, ``::`` o ``/``. Además, el objeto
+        que nombra existe o el primer tramo es un campo de la raíz del objeto abierto. Así no se
+        toma por ruta un valor copiado (``350``, ``Jump``, ``true``).
+        """
+        candidate = text.strip()
+        if not candidate or len(candidate) > MAX_LOCATION_LENGTH:
+            return False
+        if not any(mark in candidate for mark in (".", "[", "·", "::", "/")):
+            return False
+        try:
+            location = self.parse_location(candidate)
+        except PathError:
+            return False
+        if location.position is not None:
+            return True
+        tree = self.cached_bod(position) if position is not None else None
+        return tree is not None and bool(location.steps) and bod.find_path(tree, list(location.steps[:1])).complete
 
     def edit(self, position: int, path: tuple, state: State) -> EditGroup | None:
         """Aplica un estado nuevo ya validado; devuelve ``None`` si no cambia nada."""
@@ -234,7 +379,7 @@ class Document:
             return None
         if isinstance(node, bod.ExternalRef) and state not in self._by_identity:
             raise EditError(f"No existe ningún objeto {identity_text(*state)} en este archivo")  # type: ignore[misc]
-        return self._push(EditGroup((ValueEdit(position, path, before, state),), f"Editar {self._label(position, path)}"))
+        return self._push(EditGroup((ValueEdit(position, path, before, state),), f"Editar {self.full_label(position, path)}"))
 
     def edit_text(
         self, position: int, path: tuple, text: str, dictionary: HashDictionary | None = None
@@ -248,7 +393,7 @@ class Document:
             if change.kind == "valor" and change.path == path:
                 node = self.node_at(position, path)
                 operation = ValueEdit(position, path, edits.get_state(node), change.original_state)
-                return self._push(EditGroup((operation,), f"Revertir {self._label(position, path)}"))
+                return self._push(EditGroup((operation,), f"Revertir {self.full_label(position, path)}"))
         return None
 
     def revert_object(self, position: int) -> EditGroup | None:
@@ -275,11 +420,11 @@ class Document:
         node, _items = self._sequence_item(position, path)
         copy = bod.clone(node)
         operation = InsertItem(position, path[:-1], path[-1] + 1, copy)
-        return self._push(EditGroup((operation,), f"Duplicar {self._label(position, path)}"))
+        return self._push(EditGroup((operation,), f"Duplicar {self.full_label(position, path)}"))
 
     def remove_item(self, position: int, path: tuple) -> EditGroup:
         node, _items = self._sequence_item(position, path)
-        label = self._label(position, path)
+        label = self.full_label(position, path)
         return self._push(EditGroup((RemoveItem(position, path[:-1], path[-1], node),), f"Eliminar {label}"))
 
     def move_item(self, position: int, path: tuple, delta: int) -> EditGroup | None:
@@ -289,7 +434,7 @@ class Document:
         target = source + delta
         if not 0 <= target < len(items):
             return None
-        label = self._label(position, path)
+        label = self.full_label(position, path)
         verb = "Subir" if delta < 0 else "Bajar"
         return self._push(EditGroup((MoveItem(position, path[:-1], source, target),), f"{verb} {label}"))
 
@@ -301,7 +446,7 @@ class Document:
             raise EditError("Solo un objeto o una referencia (fuera de tuplas y de claves) puede pasar a nulo")
         node = bod.resolve(tree, path)
         operation = ReplaceValue(position, path, node, bod.Null())
-        return self._push(EditGroup((operation,), f"Poner a nulo {self._label(position, path)}"))
+        return self._push(EditGroup((operation,), f"Poner a nulo {self.full_label(position, path)}"))
 
     def copy_node(self, position: int, path: tuple) -> object:
         """Copia profunda de un nodo del árbol actual, lista para insertarla en otro sitio."""
@@ -338,7 +483,7 @@ class Document:
         if isinstance(value, bod.ExternalRef) and value.identity not in self._by_identity:
             raise EditError(f"No existe ningún objeto {identity_text(*value.identity)} en este archivo")
         operation = ReplaceValue(position, path, node, value)
-        return self._push(EditGroup((operation,), f"Rellenar {self._label(position, path)}"))
+        return self._push(EditGroup((operation,), f"Rellenar {self.full_label(position, path)}"))
 
     # --- Deshacer ----------------------------------------------------------------------------
 

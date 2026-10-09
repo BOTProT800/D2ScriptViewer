@@ -18,13 +18,17 @@ sin editar nunca cambia por redondeo ni por normalización.
 
 from __future__ import annotations
 
+import difflib
+import functools
 import math
 from decimal import Decimal
+import re
 import struct
-from typing import Iterator, NamedTuple, Union
+import unicodedata
+from typing import Callable, Iterator, NamedTuple, Union
 
 from ..binary import F32, I32, TEXT_ENCODING, U16, U32
-from ..errors import FormatError
+from ..errors import FormatError, PathError
 from ..wording import count
 
 MAGIC = b"BOD\xfd"
@@ -617,7 +621,7 @@ def clone_document(document: BodDocument) -> BodDocument:
 
 def get_slot(parent: object, key: int) -> object:
     """El hijo ``key`` de ``parent`` (mismo criterio que :func:`children`)."""
-    return children(parent)[key][1]
+    return child(parent, key)[1]
 
 
 def set_slot(parent: object, key: int, value: object) -> None:
@@ -658,6 +662,22 @@ def children(node: object) -> list[tuple[str, object]]:
     return []
 
 
+def child(node: object, step: int) -> tuple[str, object]:
+    """``children(node)[step]`` sin construir la lista entera de hijos.
+
+    En una lista de miles de elementos es la diferencia entre microsegundos y milisegundos por paso.
+    """
+    if isinstance(node, BodObject):
+        field = node.fields[step]
+        return field.name.text, field.value
+    if isinstance(node, (BodList, BodMap, BodTuple)):
+        item = node.items[step]
+        return f"[{step % len(node.items)}]", item
+    if isinstance(node, Pair):
+        return (("clave", node.key), ("valor", node.value))[step]
+    raise IndexError(step)
+
+
 def has_children(node: object) -> bool:
     if isinstance(node, BodObject):
         return bool(node.fields)
@@ -670,7 +690,7 @@ def resolve(document: BodDocument, path: Path) -> object:
     """Devuelve el nodo al que lleva ``path`` desde la raíz."""
     node: object = document.root
     for step in path:
-        node = children(node)[step][1]
+        node = child(node, step)[1]
     return node
 
 
@@ -690,14 +710,231 @@ def path_label(document: BodDocument, path: Path) -> str:
     node: object = document.root
     parts: list[str] = []
     for step in path:
-        label, node = children(node)[step]
+        label, node = child(node, step)
         if label.startswith("["):
             parts.append(label)
         elif parts:
             parts.append("." + label)
         else:
             parts.append(label)
-    return "".join(parts) or "(raíz)"
+    return "".join(parts) or ROOT_LABEL
+
+
+# --- Rutas legibles: la inversa de path_label (fase 11) ---------------------------------------
+
+ROOT_LABEL = "(raíz)"
+#: Las etiquetas de los dos hijos de un par, en su orden.
+PAIR_LABELS = ("clave", "valor")
+#: Cuántos nombres parecidos se sugieren cuando un tramo no existe.
+SUGGESTIONS = 3
+#: Un índice con más cifras no cabe en ninguna lista (y ``int()`` limita las cifras que convierte).
+MAX_INDEX_DIGITS = 18
+_OFFSET = re.compile(r"0[xX]([0-9A-Fa-f]{1,8})")
+_DIGITS = re.compile(r"[0-9]+")
+_SPACES = re.compile(r"\s*")
+#: Un nombre llega hasta un separador de la ruta, uno de los que preceden a la propiedad (``·`` o
+#: ``::``) o un carácter de control. Ninguna etiqueta del juego contiene ``:`` ni ``·``.
+_NAME = re.compile(r"[^.\[\]·:\x00-\x1f\x7f-\x9f]*")
+_ROOT_TEXTS = ("", ROOT_LABEL, "(raiz)")
+
+
+class PathStep(NamedTuple):
+    """Un tramo de una ruta legible: un nombre (``.Campo``) o un índice (``[3]``).
+
+    ``start`` y ``end`` delimitan el tramo en el texto, para señalarlo si no lleva a ninguna parte.
+    """
+
+    name: str | None
+    index: int | None
+    start: int
+    end: int
+
+    @property
+    def text(self) -> str:
+        return self.name if self.name is not None else f"[{self.index}]"
+
+
+class PathMatch(NamedTuple):
+    """Hasta dónde llega una ruta en un árbol.
+
+    ``path`` es el nodo válido más profundo. Si un tramo no se pudo seguir, ``failed`` es ese
+    tramo y ``message`` explica por qué; si se llegó, ``message`` puede llevar un aviso (un
+    nombre de campo repetido).
+    """
+
+    path: Path
+    failed: PathStep | None
+    message: str
+
+    @property
+    def complete(self) -> bool:
+        return self.failed is None
+
+
+def fold(text: str) -> str:
+    """Texto para comparar sin distinguir mayúsculas ni tildes (``Parámetros`` = ``parametros``)."""
+    decomposed = unicodedata.normalize("NFD", text)
+    return "".join(char for char in decomposed if not unicodedata.combining(char)).casefold()
+
+
+def _skip_spaces(text: str, position: int, end: int) -> int:
+    return _SPACES.match(text, position, end).end()  # type: ignore[union-attr]
+
+
+def _read_name(text: str, position: int, end: int) -> tuple[str, int, int]:
+    """El nombre que empieza en ``position``: (nombre sin espacios al final, su fin, dónde sigue)."""
+    stop = _NAME.match(text, position, end).end()  # type: ignore[union-attr]
+    name = text[position:stop].rstrip()
+    return name, position + len(name), stop
+
+
+def parse_path_label(text: str, start: int = 0, end: int | None = None) -> list[PathStep]:
+    """Los tramos de una ruta escrita como la da :func:`path_label` (``Stats.Damage[3].valor``).
+
+    Analiza ``text[start:end]``. Tolera espacios entre tramos y dentro de los corchetes, y
+    ceros a la izquierda en los índices. El texto vacío o ``(raíz)`` es la raíz. Lanza
+    :class:`PathError` con el tramo culpable si la sintaxis no es la de una ruta.
+    """
+    end = len(text) if end is None else end
+    position = _skip_spaces(text, start, end)
+    if text[position:end].rstrip().casefold() in _ROOT_TEXTS:
+        return []
+    steps: list[PathStep] = []
+    while position < end:
+        char = text[position]
+        if char == "[":
+            close = text.find("]", position + 1, end)
+            if close < 0:
+                raise PathError("Falta el «]» que cierra el índice", position, end)
+            inside = text[position + 1:close].strip()
+            if not inside:
+                raise PathError("Falta el número entre los corchetes, como [0]", position, close + 1)
+            if not _DIGITS.fullmatch(inside):
+                raise PathError(
+                    f"Entre corchetes va un número, como [0], y «{inside}» no lo es (los índices por nombre "
+                    "no están disponibles)", position, close + 1,
+                )
+            if len(inside.lstrip("0")) > MAX_INDEX_DIGITS:
+                raise PathError("Ese índice es demasiado grande para cualquier lista", position, close + 1)
+            steps.append(PathStep(None, int(inside), position, close + 1))
+            position = close + 1
+        elif char == "]":
+            raise PathError("Sobra un «]» sin su «[»", position, position + 1)
+        elif char == "." or not steps:
+            dot = position if char == "." else None
+            name_start = position if dot is None else _skip_spaces(text, position + 1, end)
+            name, name_end, position = _read_name(text, name_start, end)
+            if not name:
+                if dot is not None:
+                    raise PathError("Falta un nombre de campo tras el «.»", dot, dot + 1)
+                raise PathError(f"Una ruta empieza por un nombre de campo, no por «{char}»", name_start, name_start + 1)
+            steps.append(PathStep(name, None, name_start, name_end))
+        else:
+            raise PathError(f"Se esperaba «.» o «[» antes de «{char}»", position, position + 1)
+        position = _skip_spaces(text, position, end)
+    return steps
+
+
+def _describe(document: BodDocument, path: Path) -> str:
+    return path_label(document, path) if path else "la raíz"
+
+
+def _container_text(node: object) -> str:
+    kind = type_text(node)
+    return {"pares": "una lista de pares", "mapa": "un mapa", "tupla": "una tupla"}.get(kind, f"una {kind}")
+
+
+def _quoted(names: list[str]) -> str:
+    quoted = [f"«{name}»" for name in names]
+    return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " o " + quoted[-1]
+
+
+def _close_matches(name: str, candidates: list[str]) -> list[str]:
+    """Hasta :data:`SUGGESTIONS` candidatos parecidos a ``name``, sin distinguir mayúsculas ni tildes."""
+    folded: dict[str, str] = {}
+    for candidate in candidates:
+        folded.setdefault(fold(candidate), candidate)
+    return [folded[key] for key in difflib.get_close_matches(fold(name), list(folded), n=SUGGESTIONS, cutoff=0.6)]
+
+
+def _find_field(fields: list[Field], name: str, where: Callable[[], str]) -> tuple[int | None, str]:
+    """(índice del campo o ``None``, mensaje).
+
+    Sin campo, el mensaje explica por qué. Con campo, avisa si su nombre se repite.
+    """
+    found = [index for index, field in enumerate(fields) if field.name.text == name]
+    labels = [field.name.text for field in fields] if not found or len(found) > 1 else []
+    if not found:
+        target = fold(name)
+        found = [index for index, label in enumerate(labels) if fold(label) == target]
+        variants = sorted({labels[index] for index in found})
+        if len(variants) > 1:
+            return None, f"«{name}» puede ser {_quoted(variants)} en {where()}: escríbelo con sus mayúsculas"
+    if not found and (offset := _OFFSET.fullmatch(name)) is not None:
+        value = int(offset.group(1), 16)
+        starts = [
+            (int(match.group(1), 16), index)
+            for index, label in enumerate(labels)
+            if (match := _OFFSET.fullmatch(label)) is not None
+        ]
+        found = [index for start, index in starts if start == value]
+        if not found and starts:
+            before = [labels[index] for start, index in starts if start < value]
+            previous = f": la anterior es {before[-1]}" if before else ""
+            return None, f"«{name}» no es el comienzo de ninguna instrucción de {where()}{previous}"
+    if not found:
+        similar = _close_matches(name, labels)
+        hint = f". Parecidos: {', '.join(f'«{label}»' for label in similar)}" if similar else ""
+        return None, f"«{name}» no es un campo de {where()}{hint}"
+    if len(found) > 1:
+        return found[0], f"Hay {len(found)} campos «{labels[found[0]]}» en {where()}: se eligió el primero"
+    return found[0], ""
+
+
+def find_path(document: BodDocument, steps: list[PathStep]) -> PathMatch:
+    """Sigue ``steps`` (de :func:`parse_path_label`) desde la raíz de ``document``.
+
+    Cada nombre se busca primero exacto y, si no hay ninguno, sin distinguir mayúsculas ni
+    tildes, solo si todas las coincidencias son el mismo nombre. Un ``0x…`` sin coincidencia de
+    texto se compara por valor (``0x4e`` es ``0x004E``). Un par tiene ``clave`` y ``valor``.
+    """
+    node: object = document.root
+    path: Path = ()
+    notes: list[str] = []
+    for step in steps:
+        where = functools.partial(_describe, document, path)
+        index: int | None = None
+        message = ""
+        if isinstance(node, BodObject):
+            if step.name is None:
+                message = f"«{step.text}» no vale aquí: {where()} es un objeto y sus campos van por nombre"
+            else:
+                index, message = _find_field(node.fields, step.name, where)
+        elif isinstance(node, (BodList, BodMap, BodTuple)):
+            size = len(node.items)
+            if step.index is None:
+                message = f"«{step.text}» no vale aquí: {where()} es {_container_text(node)} y se esperaba un índice, como [0]"
+            elif step.index < size:
+                index = step.index
+            elif size:
+                message = f"«{step.text}» no existe: {where()} tiene {count(size, 'elemento')}, de [0] a [{size - 1}]"
+            else:
+                message = f"«{step.text}» no existe: {where()} no tiene elementos"
+        elif isinstance(node, Pair):
+            folded = fold(step.name) if step.name is not None else ""
+            if folded in PAIR_LABELS:
+                index = PAIR_LABELS.index(folded)
+            else:
+                message = f"«{step.text}» no vale aquí: {where()} es un par y solo tiene .clave y .valor"
+        else:
+            message = f"«{step.text}» no vale aquí: {where()} es un valor ({type_text(node)}) y no tiene hijos"
+        if index is None:
+            return PathMatch(path, step, message)
+        if message:
+            notes.append(message)
+        path += (index,)
+        node = child(node, index)[1]
+    return PathMatch(path, None, " · ".join(notes))
 
 
 def format_float(value: float) -> str:
