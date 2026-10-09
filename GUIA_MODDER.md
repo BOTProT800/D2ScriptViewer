@@ -315,8 +315,9 @@ Categorías del archivo (columna «Tipo» de la lista de objetos y filtro **Tipo
 ### Qué no tocar (o tocar con cuidado)
 
 - **Identificadores.** Los campos `…ID`, `…Id`, los que contienen `Hash` y los enteros enormes
-  (|valor| ≥ 1 000 000, casi siempre hashes de 32 bits de función desconocida) enlazan con otras
-  cosas del juego. La herramienta pide confirmación antes de cambiarlos.
+  (|valor| ≥ 1 000 000, casi siempre identificadores que el editor creó a partir de la fecha)
+  enlazan con otras cosas del juego. Por ejemplo, el `SoundID` de un disparador de animación es el
+  `ID` de un sonido de la lista del personaje. La herramienta pide confirmación antes de cambiarlos.
 - **Los `Name` de las entradas de una lista**, por lo visto arriba.
 - **Claves repetidas.** Tras Ctrl+D sobre una entrada de mapa, cambia la clave de la copia: con
   una clave repetida no se puede guardar.

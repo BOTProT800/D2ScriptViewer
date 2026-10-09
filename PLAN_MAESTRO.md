@@ -812,7 +812,10 @@ cadenas **nuevas** (falta la función de hash).
   El FNV-1 64 que contiene el ejecutable pasa la cadena a minúsculas antes de hashear, así que no es este.
 - **Los enteros de 32 bits con aspecto de hash** (p. ej. `OnStateOne = 0x4DFA84A3`, `MeshID`): no
   son ninguna de las dos mitades del CRC-64 ni el CRC-32 de las cadenas conocidas (ni sus
-  minúsculas); solo hay coincidencias al azar. La función sigue sin conocerse.
+  minúsculas); solo hay coincidencias al azar. **Resuelto en su mayoría (2026-10-09):** no son
+  hashes, sino marcas de tiempo Unix que el editor asignaba como ID (el 71,5 % de los 15 467
+  valores distintos cae entre 2010 y 2012, casi todos en horario laboral de Austin, y solo 6 son
+  negativos). Tampoco son ShortID de Wwise. Quedan excepciones sin estudiar (`research/FORMATO.md`).
 - El campo de la cabecera OBSP que vale `1` y el `u16 = 1` de la cabecera BOD.
 - La semántica de muchos enteros: algunos son IDs o hashes de 32 bits (p. ej. `OnStateOne = 0x4DFA84A3`).
 - ~~El juego de opcodes completo del bytecode.~~ Formato resuelto en la fase 7 (apéndice A.3):

@@ -69,6 +69,9 @@ baja del CRC-64, y con el CRC-32 de zlib, de las 70 182 cadenas conocidas y sus 
 coinciden 3, 1 y 0 valores, lo que cabe esperar del azar. Usan otra función, o hashean textos que
 no están en el archivo; no se ha investigado más.
 
+**Actualización 2026-10-09:** en su mayoría no son hashes, sino marcas de tiempo Unix que ponía
+el editor (sección «Audio» más abajo).
+
 ## 2026-10-04 — Fase 7: cuerpo y bytecode de los scripts
 
 Formalizados solo con los 3 690 scripts del archivo, sin analizar el ejecutable (decisión de la
@@ -113,3 +116,135 @@ fase). La especificación está en el apéndice A.3 del plan; aquí, cómo se ll
 - **Lo que sigue sin saberse:** qué hacen la mayoría de los opcodes sin operando, `0x2D` (u32) y
   los que llevan nombre sin llamada (`0x2C`, `0x3A`, `0x27`…). Las hipótesis por posición están
   en el apéndice A.3.
+
+## 2026-10-09 — Audio: bancos, sonidos e identificadores
+
+Pregunta de partida: si se modifica un banco de sonido o se añade uno nuevo, ¿se puede tocar
+`scripts.obsp` para que el juego lo incluya? Medido sobre la copia de Steam con scripts fuera del
+repositorio. Nada de esto se ha probado todavía en el juego (pruebas propuestas al final).
+
+### Cómo nombra el obsp el audio
+
+- **`SoundDesc`** es la ficha de un sonido: `ID` (int32), `Name`, `Bank` y `Event` (cadenas `0F`), y
+  a veces `Loop`, `FadeOut`, `FadeCurve` o `RefNode`. Hay 12 655 en los BOD: 7 264 en los
+  `SoundList` (tipo 3), 5 357 en listas incrustadas en Desc (`SoundsArray.SoundsLists[i].Sounds[j]`)
+  y 34 en una Instancia. Otros 9 están en valores por defecto de 3 scripts `chest_weapon_rack`, donde
+  solo se pueden parchear literales del mismo tamaño.
+- **El campo `Bank`** aparece 12 447 veces en los BOD: en 12 423 `SoundDesc` (232 no lo llevan) y en
+  24 `SoundModule`, nodos de los scripts visuales de `base/volcanic rumbles` y
+  `base/z1_ld_rm08_roomcrumble`, que reproducen por `Bank` + `Event` sin `ID`. Son 243 nombres
+  distintos; 242 sin distinguir mayúsculas, porque están `MIX_States` y `Mix_States`. El más usado
+  es `SFX_Impact_FX`. Hay bancos de personaje, de zona, de DLC y globales (`UI`, `VO`,
+  `MIX_States`, `MUS_Ambient`, `MUS_Boss`, `MUS_Stingers`).
+- **No hay ninguna lista de bancos.** Ninguna clase, campo ni símbolo de script declara, precarga o
+  carga bancos, y `.bnk`, `.pck`, `wwise`, `audiokinetic` y `fmod` no aparecen en el archivo. El
+  nombre de un banco solo está como valor de `Bank` (y como nombre de 15 `SoundList` que se llaman
+  igual).
+  - La API de audio de los scripts solo reproduce, para y ajusta el volumen:
+    - por nombre: `Sound.playUISoundByName`, `Sound.getUISoundDesc` + `Sound.playSound(desc, bool)` y `playMusic`;
+    - por ID: `playSoundId` y `stopSoundId`;
+    - y además `stopMenuMusic` y `setMasterVolume`.
+  - Las listas de carga que hay nombran paquetes, nunca bancos: los 6 `ResourcePackageNames`
+    (`base/game_packages`, `base/preload_scripts`…), `AIEnemy.Package` y otras.
+
+### Cómo llega el juego a un sonido
+
+- **Animaciones:** `SoundTrigger.SoundID` es un `SoundDesc.ID`. De 26 377 `SoundTrigger` con
+  `SoundID` (contando los `AnimationList` incrustados en Desc), 25 988 coinciden con algún
+  `SoundDesc.ID`. El disparador no tiene campo de banco ni de nombre.
+- **Los ID no son globales.** 1 190 ID están en más de un contenedor y 609 de ellos con distinto
+  `Name`, `Bank` o `Event`. Por ejemplo, el 122 es `Combat_Level1` en `base/ambient` y
+  `Footstep_Creature_Small_Metal_Thin_Land` en `impact_fx/materials`. Los datos encajan con una
+  búsqueda en las listas del propio actor (`SoundsArray.SoundsLists` de su Desc). Es una
+  inferencia, no se ha comprobado el orden cuando un ID está en dos listas del mismo actor.
+- **Scripts de interfaz:** piden el sonido por `Name` en `ui_core/uisounds`. Por ejemplo,
+  `ui_merchant/merchantmenu` llama a `Sound.playUISoundByName('UI_MerchantOpen')`, y esa entrada
+  (`Sounds[180]`) es `ID 13, Bank UI, Event MerchantOpen`.
+- **Voces de diálogo:** van por claves de localización (`LocalizationKey`, `playVO`), no por
+  `SoundDesc`. Los gritos y emotes de NPC sí tienen `SoundDesc` en el banco `VO`.
+- **Lo que viene de fuera:** 42 de los 275 `SoundList` no reciben ningún `FC` (búsqueda de bytes
+  en todo el archivo). Entre ellos están `base/music`, `vo/vo_sounds`, `death/death_vo` y los
+  `sfx_vfx_environmental_*`, así que los carga algo externo al obsp (código, niveles o paquetes).
+  `base/music` solo tiene la zona 1. Samael llama a
+  `visScriptCall('Z4_LD_08_Samael_BossFight_VSM', 'CombatMusic_TurnOFFAmbient')`, un script visual
+  de nivel.
+- **Música que sí está en el obsp:**
+  - la de la pantalla de carga: `ui_core/storyboardloading` usa `UI_start_screen_music_N`, que en
+    `ui_core/uisounds` llevan los eventos `MUS_Z1_Theme`…`MUS_Z4_Theme`;
+  - la del menú y la de los créditos;
+  - la de los jefes;
+  - la intensidad de combate: `CombatMusicIntensity` en las oleadas de 6 scripts de encuentros, y
+    `Music_Intensity_0x` → `Combat_Intensity_0x` en `sfx_global/global_sounds`.
+
+### Middleware: probablemente Wwise, con nombres y no con ID de Wwise
+
+- **Indicios de Wwise:** `RTPCName = 'Ball_Velocity'` en `rolleyball/rolleyball_anims`, el banco
+  `MIX_States` con eventos de estado (`State_*`, `Combat_Intensity_*`) y los prefijos `Play_` y
+  `Stop_`. La guía Darksiders2-Modding del autor sitúa el audio en `sounds_streamed/PC`
+  (`core.pck`, `en.pck`, `es.pck`). No se ha comprobado con los archivos de audio.
+- **El archivo no contiene ShortID de Wwise.** En Wwise, los ID de bancos, eventos y game syncs son
+  el FNV-1 de 32 bits del nombre en minúsculas. Nuestra implementación da 1355168291 para `init`,
+  el número con el que wwiser dice que aparece `init.bnk`. Comparando con todos los int32 grandes
+  del archivo, FNV-1 y FNV-1a, con y sin minúsculas, sobre unas 107 000 cadenas del archivo, solo
+  coinciden 2 valores, y sin relación con su fila; por azar cabían unos 0,4. Cada ID comparado con
+  su propio `Name`, `Bank` o `Event` no coincide nunca.
+- **Consecuencia (inferida):** el juego pasa a Wwise los nombres (`Bank`, `Event`, `RTPCName`) y
+  los convierte en tiempo de ejecución, o con una tabla propia que no está en el obsp.
+
+### Los enteros «con aspecto de hash» son, en su mayoría, marcas de tiempo
+
+Los 15 467 int32 distintos con |valor| ≥ 1 000 000 de los BOD (67 453 apariciones) no se comportan
+como hashes:
+
+- 11 064 (71,5 %) son fechas Unix entre el 7 de enero de 2010 y el 22 de octubre de 2012;
+- de esos, el 80,7 % cae entre las 9 y las 19 h de Austin (sede de Vigil Games) y el 93,2 %, de
+  lunes a viernes;
+- solo 6 de los 15 467 son negativos, cuando un hash de 32 bits daría la mitad.
+
+En `SoundDesc.ID` pasa lo mismo: 4 745 valores grandes, el 67,1 % en ese intervalo y ninguno
+negativo. Los ID pequeños (`1220`, `13`…) parecen secuenciales.
+
+Son, por tanto, identificadores que el editor asignaba al crear cada entrada. Para referenciarlos
+hace falta que coincidan, no calcular ningún hash. Un ID nuevo solo necesitaría no repetirse allí
+donde se busca, aunque eso no se ha probado en el juego. Quedan excepciones sin estudiar, como
+`ProjectileDesc.MeshID` o `InputWindow.ID` negativo.
+
+### Qué implica para un banco modificado o nuevo
+
+- **Mismo banco, mismos eventos:** el obsp no cambia, porque solo guarda los nombres. Si el audio
+  pasa de bucle a sonido único o al revés, quizá haya que ajustar `Loop`, `FadeOut` o `FadeCurve`.
+- **Banco nuevo:** el obsp puede nombrarlo de dos formas.
+  - Cambiar `Bank` y `Event` de un `SoundDesc` existente; la herramienta avisa de las cadenas
+    nuevas y calcula su hash. Hay listas compartidas: `death/death_sounds` la usan 137 objetos.
+  - Copiar un `SoundDesc` con un `ID` nuevo en una lista del actor y apuntarle un `SoundTrigger`.
+
+  Comprobado en memoria sobre `ui_core/uisounds · Sounds[180]`, sin escribir en disco:
+
+  | Cambio | Aviso de cadena nueva | `prepare_save` y `verify_plan` | Tamaño |
+  |---|---|---|---|
+  | `Event` → `MerchantBadBuy` | no | pasan | 18 334 463 |
+  | `Bank` → `SFX_Character_Archon`, `Event` → `Archon_Air_Impact` | no | pasan | 18 334 512 |
+  | `Bank` → `MOD_Test`, `Event` → `MOD_Test_Play` | sí | pasan | 18 334 496 |
+
+  Lo que el obsp no puede hacer es que el juego cargue el banco. Tampoco se sabe si el juego carga
+  un banco solo porque un `SoundDesc` lo nombra, ni dónde buscaría uno nuevo (suelto o dentro de
+  `core.pck`).
+- **Duda abierta:** 71 eventos aparecen con dos bancos distintos, por ejemplo los de Samael en
+  `samael/samael_targethelperdesc` y en `samael_common_sounds`. Puede que el motor no exija que el
+  evento esté en el banco que se nombra.
+
+### Pruebas en el juego propuestas (no hechas)
+
+Sobre `ui_core/uisounds · Sounds[180]`, que suena al abrir la tienda de un comerciante:
+
+1. **Control:** `Event` → `MerchantBadBuy`. Debería oírse el sonido de compra fallida.
+2. **Carga por nombre:** `Bank` → `SFX_Character_Archon`, `Event` → `Archon_Air_Impact`, lejos de
+   donde aparece el Archon. Si suena, el juego carga el banco que nombra el obsp.
+3. **Banco nuevo:** generar `MOD_Test` con el evento `MOD_Test_Play`, con la versión de Wwise del
+   juego, colocarlo primero suelto y luego en el `.pck`, y poner esos nombres en la entrada.
+4. **Disparador de un personaje:** copiar un `SoundDesc` en `death/death_sounds` con un ID nuevo y
+   apuntarle un `SoundTrigger` de `death/death_animations`.
+
+Sin abrir el juego, cargar `core.pck` en wwiser con la lista de bancos y eventos del obsp
+confirmaría que es Wwise y que esos son los nombres reales. También daría la versión de Wwise
+(cabecera `BKHD` de un banco).

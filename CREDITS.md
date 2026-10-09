@@ -35,6 +35,8 @@ Lo siguiente es trabajo del mismo autor y no requiere entrada, pero se deja cons
   `0x0060034000F0D50B`, valor inicial y XOR final `~0`) se dedujeron analizando los pares
   hash↔cadena del propio archivo (`research/FORMATO.md`).
 - **Tema oscuro, estructura del repositorio, CI y preferencias:** Darkstractor.
+- **Ubicación del audio en la instalación** (`sounds_streamed/PC`, `core.pck` y un `.pck` por
+  idioma): guía Darksiders2-Modding del mismo autor, citada en `research/FORMATO.md` (2026-10-09).
 
 ## Tools
 
@@ -99,7 +101,25 @@ Ninguno.
 
 ## References and documentation
 
-Ninguna.
+### wwiser: documentación sobre los ID de Wwise
+
+- **Autor(es):** bnnm.
+- **Fuente:** https://github.com/bnnm/wwiser (`doc/WWISER.md` y `wwiser/wfnv.py`, leídos el
+  2026-10-09).
+- **Licencia:** **pendiente de confirmar.** No se encontró `LICENSE`, `LICENSE.md`, `LICENSE.txt`
+  ni `COPYING` en la rama `master` el 2026-10-09, y desde este entorno no se pudo consultar la API
+  de GitHub. No se copia código ni texto, solo se cita un dato.
+- **Redistribución:** No.
+- **Incorporado:** 2026-10-09
+- **Dónde se usa:** [research/FORMATO.md](research/FORMATO.md), sección «Audio» del 2026-10-09.
+- **Uso:** referencia. Documenta que los ID de bancos, eventos y game syncs de Wwise son el FNV-1
+  de 32 bits del nombre en minúsculas (según wwiser, el algoritmo lo da Audiokinetic en su
+  documentación) y que `init.bnk` aparece a veces como `1355168291.bnk`. FNV-1 es un algoritmo de
+  dominio público; la comprobación se hizo con una implementación propia en scripts fuera del
+  repositorio.
+- **¿Modificado?:** No aplica.
+- **Para qué nos sirvió:** descartar que los int32 de `scripts.obsp` sean ShortID de Wwise, y
+  comprobar que la implementación de FNV-1 da el ID de `init`.
 
 ## History
 

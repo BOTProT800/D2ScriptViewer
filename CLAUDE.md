@@ -194,7 +194,13 @@ encuentran.
   `0x0060034000F0D50B` (reflejado `0xD0AB0F0002C00600`) y valor inicial y XOR final `~0`, sobre
   los bytes de la cadena. Distingue mayúsculas, da 0 para la cadena vacía y es la misma en el
   contenedor, los BOD y los scripts. `idObjeto` es el hash del nombre en minúsculas. Los enteros
-  de 32 bits con aspecto de hash usan otra función, todavía desconocida.
+  de 32 bits con aspecto de hash no son hashes: en su mayoría son marcas de tiempo Unix
+  (2010–2012) que el editor asignaba como ID, p. ej. `SoundDesc.ID`, al que apunta
+  `SoundTrigger.SoundID` (`research/FORMATO.md`, 2026-10-09).
+- **Audio** (`research/FORMATO.md`, 2026-10-09): cada `SoundDesc` nombra su `Bank` y su `Event`
+  (cadenas `0F`), pero el obsp no tiene ninguna lista de bancos ni los carga. Un banco
+  modificado con los mismos nombres no exige tocarlo; uno nuevo se puede nombrar, pero falta
+  probar en el juego si se carga.
 
 ### Flujo de la aplicación (sección 5 del plan)
 
