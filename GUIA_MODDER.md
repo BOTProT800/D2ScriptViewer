@@ -221,10 +221,13 @@ guarda la partida mientras un cambio lo tiene en mal estado, esa partida puede q
 | Lógica de un script | `ui_core/pausemenu` (script) | `Funciones.onInit.0x004E`, el `true` de `Game.setPaused(true)` | `true` → `false` | El menú de pausa ya no detiene el juego |
 | Estructura de una lista | `death/playercommon_movestates` | Duplicar `MoveStates[0]` (Ctrl+D) | — | El juego carga la lista más larga sin problemas |
 | Texto sin hash más largo | `base/quest_test_dialog` (`DialogSet`) | `Dialogs[0].Actions[1].FlagID` | +5 caracteres | El archivo cambia de tamaño y el juego lo carga |
+| Sonido de una acción | `death/death_sounds` (`SoundList`) | `Sounds[47].Event`, la entrada con `Name` = `death_whoosh_jump` | `Jump_Whoosh` → `Voc_Death_Death` | Saltar suena al grito de muerte de Death |
+| Sonido de otro personaje | `death/death_sounds` | `Sounds[47].Bank` y `Sounds[47].Event` | `SFX_Character_Archon` y `Voc_Archon_Corrupted_Scream` | El doble salto suena al grito del Archon, también lejos de su zona |
 
 Las rutas de la columna Propiedad se pueden pegar en Ctrl+G con el objeto abierto, o con el
 objeto delante: `death/playercommon_movestates · MoveStates[44].JumpImpulse`,
-`ui_core/pausemenu · Funciones.onInit.0x004E` o `base/quest_test_dialog · Dialogs[0].Actions[1].FlagID`.
+`ui_core/pausemenu · Funciones.onInit.0x004E`, `base/quest_test_dialog · Dialogs[0].Actions[1].FlagID`
+o `death/death_sounds · Sounds[47].Event`.
 En `Animations[n].AnimationName`, cambia `n` por el índice de la animación.
 
 Lo que enseñan esas pruebas:
@@ -240,6 +243,14 @@ Lo que enseñan esas pruebas:
   `PaperDoll_Idle`), se reproduce una vez y se queda congelada en el último fotograma.
 - **En los scripts** solo se cambian literales `int`, `float` y `bool` sin alterar tamaños. El
   número de argumentos de una llamada (el `int n` antes de la llamada) es de solo lectura.
+- **Para cambiar un sonido, edita `Event`** (y `Bank` si el evento es de otro banco), no `ID` ni
+  `Name`. Cada animación dispara sus sonidos por número (`SoundID` en `Triggers`), que es el `ID`
+  de una entrada de la lista de sonidos del personaje. Así, el cambio afecta a todas las
+  animaciones que usan esa entrada: `death_whoosh_jump` suena en el salto, el doble salto, las
+  cornisas y más. Los eventos que existen salen de los `Event` de otras entradas: busca uno con
+  Ctrl+Mayús+F. Que el juego cargue un banco nuevo, que no venga con él, está sin probar.
+- **Elige para probar un sonido que se repita y se oiga bien.** Un silbido corto que desaparece se
+  nota poco; un grito donde había un silbido, sí.
 
 ### No probado en el juego: los huecos del inventario
 
@@ -273,7 +284,7 @@ Categorías del archivo (columna «Tipo» de la lista de objetos y filtro **Tipo
 | `FloatTable` | 65 | Tablas de floats con nombres de fila y de columna | Tablas numéricas: expórtalas a CSV para ver qué es cada una |
 | `Instancia` | 757 | `ItemGeneratorTable`, `Quest`, `DialogSet` y otras clases de script | Generación de objetos, misiones y diálogos, a juzgar por los nombres |
 | `Script` | 3 690 | Scripts compilados | Literales del código (probado) |
-| `SoundList` | 275 | Sonidos por personaje | Por explorar |
+| `SoundList` | 275 | Sonidos por personaje (`ID`, `Name`, `Bank`, `Event`) | Cambiar sonidos (probado) |
 | `HitInfoList` | 3 | Información de golpes | Por explorar |
 | `InputWindowList` | 5 | Ventanas de entrada (combos, por el nombre) | Por explorar |
 | `CharacterConditionalList` | 7 | Condiciones por personaje | Por explorar |

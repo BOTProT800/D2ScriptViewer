@@ -199,8 +199,11 @@ encuentran.
   `SoundTrigger.SoundID` (`research/FORMATO.md`, 2026-10-09).
 - **Audio** (`research/FORMATO.md`, 2026-10-09): cada `SoundDesc` nombra su `Bank` y su `Event`
   (cadenas `0F`), pero el obsp no tiene ninguna lista de bancos ni los carga. Un banco
-  modificado con los mismos nombres no exige tocarlo; uno nuevo se puede nombrar, pero falta
-  probar en el juego si se carga.
+  modificado con los mismos nombres no exige tocarlo. Validado en el juego el 10 de octubre
+  (`research/PRUEBAS_EN_JUEGO.md`): cambiar `Event` cambia el sonido de todas las animaciones
+  cuyo `SoundTrigger.SoundID` apunta a ese `ID`, y un evento de otro banco del juego
+  (`SFX_Character_Archon` en el salto de Death, en la zona 1) también suena. Falta saber si el
+  banco se carga por el campo `Bank` o ya estaba cargado, y si un banco nuevo se carga.
 
 ### Flujo de la aplicación (sección 5 del plan)
 

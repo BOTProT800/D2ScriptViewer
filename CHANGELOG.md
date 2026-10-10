@@ -31,6 +31,13 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   qué se ha modificado con éxito en el juego, dónde buscar el resto y qué no conviene tocar.
   Recomienda copiar las partidas guardadas antes de probar: la herramienta solo protege
   `scripts.obsp`. Incluye el ejemplo de los huecos del inventario, sin probar en el juego.
+- Pruebas de audio en el juego (`research/PRUEBAS_EN_JUEGO.md`, `research/FORMATO.md`):
+  - cambiar el `Event` de una entrada de `death/death_sounds` cambia el sonido de todas las
+    animaciones que la disparan;
+  - nombrar en esa entrada el banco y un evento del Archon hace sonar su grito en Tripetra, lejos
+    de la zona del Archon.
+
+  `GUIA_MODDER.md` lo recoge en lo probado, con cómo cambiar un sonido.
 
 ### Changed
 

@@ -359,3 +359,212 @@ Con el usuario se decidió cerrar la prueba con este resultado:
   mano, se cumplió byte a byte (mismo SHA), y el juego lo cargó con su efecto (salto alto);
 - la parte del muñeco no dependía del parche, sino de qué campo se editó, que fue el mismo en
   las dos versiones.
+
+## Audio — evento y banco de un sonido de interfaz (2026-10-09)
+
+Primeras pruebas de audio, a partir de las propuestas de `research/FORMATO.md` (sección
+«Audio», 2026-10-09). Se hacen juntas, en un solo guardado:
+
+- **Prueba 1, control:** cambiar el `Event` de un `SoundDesc` por otro del mismo banco. Comprueba
+  que el juego reproduce el evento que nombra el obsp.
+- **Prueba 2, carga por nombre:** apuntar otro `SoundDesc` a un evento de un banco de personaje
+  que no tiene por qué estar cargado en ese momento. Comprueba si el juego carga un banco solo
+  porque un `SoundDesc` lo nombra.
+
+### Edición elegida
+
+- **Objeto:** `ui_core/uisounds` (`SoundList`, posición 3 887). `ui_merchant/merchantmenu` y
+  `ui_merchant/blackrootmenu` piden sus sonidos aquí por `Name` con
+  `Sound.playUISoundByName`: `UI_MerchantOpen` en `onInit` y `UI_MerchantClose` al cerrar.
+  `UI_MerchantBadBuy` suena en `onMerchantPurchaseErrorFunds` y `onMerchantPurchaseErrorLevel`.
+- **Cambios** (ninguna cadena es nueva: no hay aviso):
+  - `Sounds[180].Event` (`UI_MerchantOpen`, banco `UI`): `MerchantOpen` → `MerchantBadBuy`;
+  - `Sounds[170].Bank` (`UI_MerchantClose`): `UI` → `SFX_Character_Archon`;
+  - `Sounds[170].Event`: `MerchantClose` → `Voc_Archon_Corrupted_Scream`, un grito, para que no
+    se confunda con un sonido de interfaz. Es uno de los 121 `SoundDesc` del banco, todos en
+    `archon_common/sfx_character_archon`.
+- **Base:** el archivo instalado, no el de Steam. Lleva un cambio del usuario del 6 de octubre:
+  `death/death · Funciones.onInit.0x0783` 21 → 30, el literal del primer `NumSlots` de
+  `GUIA_MODDER.md`. La prueba lo conserva; para deshacerla se vuelven a poner los tres valores,
+  no se usa Restaurar original.
+- **En el ensayo**, en memoria y sobre una copia en una carpeta temporal: `prepare_save` y
+  `verify_plan` pasan sin avisos; solo cambia `ui_core/uisounds`; el archivo pasa de 18 334 463 a
+  18 334 522 bytes (+59); el SHA del archivo guardado es
+  `EF6E6DED1B2FFCF9A675D8DA23C5AD87481BB1E2D1E6158007E878B1D6FF0421`; `verify` da correcto, y
+  deshacer los tres cambios devuelve `ADC2B872…`. Sobre el original de Steam darían el mismo
+  tamaño y el SHA `43328BEA…`.
+- **Efecto esperado** en cualquier comerciante:
+  - al abrir la tienda suena el «no puedes comprarlo» (`MerchantBadBuy`) en lugar del sonido de
+    apertura;
+  - comprar sin dinero suficiente sigue sonando igual, porque `Sounds[168]` no se toca;
+  - al cerrar la tienda, el grito del Archon si el juego carga el banco, y silencio (o el sonido
+    de siempre) si no.
+- **Hipótesis:**
+  - que la entrada `Sounds[180]` sea la que suena se deduce de la llamada por nombre; si el
+    juego buscara por `ID` (13) daría lo mismo, porque no cambia;
+  - con Wwise, un evento de un banco sin cargar no suena y no da error. Si el cierre queda en
+    silencio, el juego no carga bancos por el obsp; si suena el grito, sí, o el banco ya estaba
+    cargado.
+- **Estado de la instalación antes de la prueba** (leído en solo lectura):
+  - `scripts.obsp`: 18 334 463 bytes, SHA `ADC2B872767005440BD41E8A20F964DA1EE280CC5BD5167C9FB783EEE8E60020`
+    (20:49:27 del 6 de octubre), el original con el cambio de `NumSlots`;
+  - `scripts.original.obsp` intacto (`B46DD3DA…`, 03:42:21 del 4 de octubre);
+  - 5 copias rotativas, la última de las 20:49:27 del 6 de octubre (`B46DD3DA…`);
+  - `Darksiders2.exe` con el SHA de siempre.
+
+### Resultado (2026-10-10): no concluyente
+
+El usuario informó de que no notó nada y propuso probar con otras acciones. Al preguntarle por
+el cierre de la tienda, no se había fijado.
+
+**Evidencia en la instalación**, leída después del informe y solo para leer:
+
+- **23:49:12 del 9 de octubre, guardado.** La copia rotativa `scripts.20261009-234912-942105.obsp`
+  es la versión previa, `ADC2B872…` (con `NumSlots`).
+- **00:08:12, Restaurar original.** La copia rotativa `scripts.20261010-000812-646880.obsp`
+  guarda la versión jugada: 18 334 522 bytes, como en el ensayo, pero con SHA `6A805E6B71F6BAFA…`
+  en lugar de `EF6E6DED…`. Comparada con `ADC2B872…`, solo lleva los dos cambios de
+  `Sounds[170]` (banco y evento del cierre). `Sounds[180].Event` siguió en `MerchantOpen`, y por
+  eso no cambia el tamaño: `MerchantBadBuy` ya estaba en la tabla del BOD.
+- **Archivo instalado:** el original de Steam (`B46DD3DA…`). Restaurar quitó también el cambio
+  de `NumSlots`. Se guardó como parche, fuera del repositorio y de la carpeta del juego, en
+  `Extractions\Darksiders\numslots_21_a_30.d2svpatch.json`; aplicado sobre el original da
+  `ADC2B872…`.
+
+**Conclusión:** la prueba 1 no se hizo, porque faltó el cambio de la apertura. De la 2 no hay
+observación. Los sonidos de la tienda son cortos y se oyen poco, así que se pasa a acciones de
+Death que se repiten mucho.
+
+## Audio — salto y esquiva de Death (2026-10-10)
+
+Las mismas dos preguntas que en la prueba de la tienda, con sonidos que se oyen a menudo. Las
+animaciones disparan sus sonidos por `SoundTrigger.SoundID`, que es un `SoundDesc.ID` de
+`death/death_sounds` (`SoundList`, posición 3 059).
+
+### Edición elegida
+
+- **Prueba 1, control:** `Sounds[47]` (`death_whoosh_jump`, ID 60200, banco
+  `SFX_Character_Death`). Lo disparan 98 animaciones: `Jump` y `Jump_Double` de Death, las de
+  cornisas y las de montar en el constructo. El salto lleva además la voz `Voc_Death_Jump`
+  (`Sounds[131]`, sin tocar).
+  - `Sounds[47].Event`: `Jump_Whoosh` → `Voc_Death_Death`, el grito de muerte de Death, del mismo
+    banco (`Sounds[130]`, que solo disparan `Death_Start` y `KillRegion_Start`).
+- **Prueba 2, carga por nombre:** `Sounds[42]` (`death_whoosh_flip`), el silbido al empezar las
+  cuatro esquivas (`Evade_F`, `Evade_B`, `Evade_L`, `Evade_R`). La esquiva lleva además la voz
+  `Voc_Death_Jump` y, al terminar, `Evade_Whoosh_End` (`Sounds[41]`), los dos sin tocar.
+  - `Sounds[42].Bank`: `SFX_Character_Death` → `SFX_Character_Archon`;
+  - `Sounds[42].Event`: `Flip_Whoosh` → `Voc_Archon_Corrupted_Scream`.
+- **Ninguna cadena es nueva** en el archivo, así que no hay aviso. Las dos del Archon sí son
+  nuevas en la tabla de nombres de ese BOD.
+- **Base:** el instalado, que es el original de Steam (`B46DD3DA…`, 00:08:12).
+- **En el ensayo**, en memoria y sobre una copia en una carpeta temporal: `prepare_save` y
+  `verify_plan` pasan sin avisos; solo cambia `death/death_sounds`; el archivo pasa de 18 334 463
+  a 18 334 488 bytes (+25); el SHA del archivo guardado es
+  `CE512D177DC344145870DA5A97A71E180A466356C14EEA93618BF57AF6C36C63`; `verify` da correcto, y
+  deshacer los tres cambios devuelve `B46DD3DA…`. Sobre la versión con `NumSlots` darían
+  `48AD7F79…`, del mismo tamaño.
+- **Efecto esperado:**
+  - al saltar y en el doble salto, el grito de muerte de Death en lugar del silbido;
+  - al esquivar, el grito del Archon si el juego carga el banco. Si no lo carga, la esquiva
+    pierde el silbido del principio, pero conserva la voz y el silbido final.
+- **Hipótesis:**
+  - que `SoundTrigger.SoundID` busque en las listas del propio actor (`research/FORMATO.md`);
+    el ID 60200 solo está en `death/death_sounds`, así que no hay otra entrada que pueda ganar;
+  - con Wwise, un evento de un banco sin cargar no suena y no da error.
+- **Estado de la instalación antes de la prueba** (leído en solo lectura): `scripts.obsp`
+  original de Steam (`B46DD3DA…`, 00:08:12 del 10 de octubre), `scripts.original.obsp` intacto
+  (03:42:21 del 4 de octubre) y 5 copias rotativas, la última de las 00:08:12 (`6A805E6B…`, la
+  prueba de la tienda).
+
+### Resultado (2026-10-10)
+
+El usuario informó de que todo fue bien y de que lo devolvió a los valores originales. Al
+preguntarle, contestó:
+
+- **Salto y doble salto:** el grito de muerte de Death en lugar del silbido. **La prueba 1 se
+  cumple.**
+- **Esquiva:** no está seguro de qué sonó al empezar. **La prueba 2 no es concluyente.** El
+  silbido inicial es corto y se mezcla con el gruñido de Death y el silbido del final.
+- **Lugar:** no sabe si estaba cerca de la zona del Archon. Según el obsp, es la zona 3
+  (`base/quest_z3mq0_find_archon`, `zone03_archontower`).
+
+**Evidencia en la instalación**, leída después del informe y solo para leer. El usuario guardó
+tras cada cambio:
+
+- **00:34:54:** `Sounds[47].Event` (18 334 446 bytes, `6662F03C…`). La copia rotativa de ese
+  momento es el original (`B46DD3DA…`).
+- **00:35:35:** además, `Sounds[42].Bank` (18 334 472 bytes, `231FC595…`).
+- **00:35:42:** además, `Sounds[42].Event`. Es la versión jugada, guardada en la copia rotativa
+  `scripts.20261010-004009-665418.obsp`: 18 334 488 bytes, SHA `CE512D177DC34414…`, **idéntica
+  al ensayo**. Comparada con el original, lleva justo los tres cambios.
+- **00:40:09, restauración:** `scripts.obsp` es el original de Steam (`B46DD3DA…`), y
+  `scripts.original.obsp` sigue intacto.
+- **Copias rotativas:** quedan las últimas 5. La poda borró la de `ADC2B872…` (con `NumSlots`),
+  que sigue disponible como parche en `Extractions\Darksiders`.
+
+**Conclusión:** el juego reproduce el `Event` que nombra el obsp. El camino es la animación,
+luego `SoundTrigger.SoundID`, luego el `SoundDesc` con ese `ID` en `death/death_sounds`, y por
+último su `Event`. Cambiar el evento de una entrada cambia el sonido en todas las animaciones que
+la disparan. Falta saber si un evento de otro banco suena.
+
+## Audio — grito del Archon en el salto (2026-10-10)
+
+Repite la prueba 2 de la sección anterior en el disparador que ya se sabe que funciona, para que
+el resultado no dependa de oír la falta de un silbido corto.
+
+### Edición elegida
+
+- **Objeto:** `death/death_sounds`, `Sounds[47]` (`death_whoosh_jump`, ID 60200):
+  - `Bank`: `SFX_Character_Death` → `SFX_Character_Archon`;
+  - `Event`: `Jump_Whoosh` → `Voc_Archon_Corrupted_Scream`.
+- **Base:** el instalado, el original de Steam (`B46DD3DA…`, 00:40:09).
+- **En el ensayo**, en memoria y sobre una copia en una carpeta temporal: `prepare_save` y
+  `verify_plan` pasan sin avisos; solo cambia `death/death_sounds`; el archivo pasa de 18 334 463
+  a 18 334 505 bytes (+42); el SHA del archivo guardado es
+  `7F8B4AEEDB5B7D3365552D603AB680BADF15FBA75E5295424E4617754392BABE`; `verify` da correcto, y
+  deshacer los dos cambios devuelve `B46DD3DA…`.
+- **Efecto esperado:** el doble salto solo dispara `Sounds[47]`.
+  - Si el juego carga el banco, suena el grito del Archon.
+  - Si no lo carga, el doble salto queda en silencio, y el salto simple solo conserva el gruñido
+    de Death (`Sounds[131]`).
+- **Para interpretarlo hace falta el lugar:** si suena lejos de la zona 3 y antes de llegar al
+  Archon en la historia, el banco no estaba cargado por la zona.
+
+### Primer intento (2026-10-10): no vale
+
+El usuario informó de que la hizo y la restauró. Al preguntarle, dijo que el doble salto sonó al
+grito del Archon y que no recuerda el mensaje de guardado.
+
+**Evidencia en la instalación**, leída a las 00:55 y solo para leer: no hubo ningún guardado.
+`scripts.obsp` sigue siendo el original de Steam con fecha de las 00:40:09 (la restauración
+anterior), no hay copias rotativas nuevas, y ningún `.obsp` de la carpeta del juego ni de la del
+usuario cambió después de las 00:41. Así que el juego no pudo cargar el cambio de esta prueba, y
+lo que se oyó no se puede atribuir a él. Se repite con un punto de control: tras guardar, Claude
+comprueba el SHA instalado antes de abrir el juego.
+
+### Resultado (2026-10-10)
+
+- **02:53:37, guardado.** Antes de abrir el juego, Claude leyó la instalación en solo lectura:
+  `scripts.obsp` medía 18 334 505 bytes con SHA `7F8B4AEE…`, idéntico al ensayo; la copia
+  rotativa de ese momento era el original (`B46DD3DA…`), y el juego estaba cerrado.
+- **En el juego**, en Tripetra (Tierras de la Forja, la primera zona), el usuario informó de que
+  **el doble salto sonó al grito del Archon**. No dijo si ya había llegado al Archon en esa
+  partida.
+- **02:57:32, Restaurar original.** La copia rotativa `scripts.20261010-025732-511862.obsp` guarda
+  la versión jugada (`7F8B4AEE…`). `scripts.obsp` volvió a 18 334 463 bytes y `B46DD3DA…`, y
+  `scripts.original.obsp` sigue intacto. El juego estaba cerrado.
+
+### Conclusión
+
+Un `SoundDesc` de Death que nombra el banco de otro personaje (`SFX_Character_Archon`) y uno de
+sus eventos suena en una zona donde ese personaje no aparece. Para un modder, cualquier sonido
+puede tomar el evento de otro banco del juego cambiando `Bank` y `Event`.
+
+Lo que esta prueba no distingue:
+
+- **Cómo llega el banco a estar cargado.** Puede que el juego lo cargue al leer el `Bank` del
+  `SoundDesc`, o que ya estuviera cargado (todos los bancos al empezar, o los de las listas de
+  sonido que se cargan). Se distinguiría con un `SoundDesc` que nombre el banco de Death con un
+  evento del Archon: si también suena, el campo `Bank` no decide qué se carga.
+- **Si funciona con un banco nuevo**, que no venga con el juego (prueba 3 de
+  `research/FORMATO.md`).

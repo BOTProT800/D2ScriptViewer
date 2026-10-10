@@ -123,6 +123,10 @@ Pregunta de partida: si se modifica un banco de sonido o se añade uno nuevo, ¿
 `scripts.obsp` para que el juego lo incluya? Medido sobre la copia de Steam con scripts fuera del
 repositorio. Nada de esto se ha probado todavía en el juego (pruebas propuestas al final).
 
+**Actualización 2026-10-10:** las pruebas 1 y 2 se hicieron en el juego, con sonidos de Death en
+lugar de los de la tienda (resultados al final y en `research/PRUEBAS_EN_JUEGO.md`). El juego
+reproduce el `Event` que nombra el obsp, también el de un banco de otro personaje.
+
 ### Cómo nombra el obsp el audio
 
 - **`SoundDesc`** es la ficha de un sonido: `ID` (int32), `Name`, `Bank` y `Event` (cadenas `0F`), y
@@ -233,7 +237,7 @@ donde se busca, aunque eso no se ha probado en el juego. Quedan excepciones sin 
   `samael/samael_targethelperdesc` y en `samael_common_sounds`. Puede que el motor no exija que el
   evento esté en el banco que se nombra.
 
-### Pruebas en el juego propuestas (no hechas)
+### Pruebas en el juego propuestas (2026-10-09; resultados en la sección siguiente)
 
 Sobre `ui_core/uisounds · Sounds[180]`, que suena al abrir la tienda de un comerciante:
 
@@ -248,3 +252,23 @@ Sobre `ui_core/uisounds · Sounds[180]`, que suena al abrir la tienda de un come
 Sin abrir el juego, cargar `core.pck` en wwiser con la lista de bancos y eventos del obsp
 confirmaría que es Wwise y que esos son los nombres reales. También daría la versión de Wwise
 (cabecera `BKHD` de un banco).
+
+### Resultados en el juego (2026-10-10)
+
+Detalle y evidencia en `research/PRUEBAS_EN_JUEGO.md` (secciones «Audio»).
+
+- **Tienda (pruebas 1 y 2 sobre `ui_core/uisounds`): sin resultado.** El cambio de la apertura no
+  llegó a guardarse, y el cierre no se escuchó con atención. Los sonidos de la tienda son cortos y
+  poco frecuentes; se pasó a acciones de Death.
+- **Prueba 1, control: se cumple.** `death/death_sounds · Sounds[47].Event` (`death_whoosh_jump`,
+  ID 60200, el que disparan el salto, el doble salto y 96 animaciones más): `Jump_Whoosh` →
+  `Voc_Death_Death`. El salto suena al grito de muerte de Death.
+- **Prueba 2, carga por nombre: se cumple.** En la misma entrada, `Bank` → `SFX_Character_Archon`
+  y `Event` → `Voc_Archon_Corrupted_Scream`. El doble salto suena al grito del Archon en
+  Tripetra, en las Tierras de la Forja. Según el obsp, el Archon es de la zona 3
+  (`base/quest_z3mq0_find_archon`, `zone03_archontower`). En la esquiva (`Sounds[42]`) el
+  resultado no fue concluyente: el silbido inicial es corto y se mezcla con otros.
+- **Queda abierto:**
+  - si el banco se carga por el `Bank` del `SoundDesc` o ya estaba cargado (todos al empezar,
+    por ejemplo). Se distinguiría nombrando el banco de Death con un evento del Archon;
+  - las pruebas 3 (banco nuevo) y 4 (`SoundDesc` nuevo con un `SoundTrigger`).
