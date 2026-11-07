@@ -7,6 +7,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-07
+
 ### Added
 
 - Ir a una ruta (fase 11): Ctrl+G o Ir → Ir a la ruta… abre una barra «Ir a» sobre el árbol de

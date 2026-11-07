@@ -1,5 +1,30 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Versión 1.1.0 preparada (2026-11-07).** `__version__` pasa a `1.1.0` y la sección
+> `[Unreleased]` del `CHANGELOG.md` queda como `[1.1.0] - 2026-11-07`. La versión recoge las
+> fases 10 y 11 y las pruebas de audio.
+>
+> - **Estado en GitHub:**
+>   - el repositorio es público y `main` estaba al día con `origin/main` (`0ef4eed`), con la CI
+>     de tests en verde;
+>   - no hay etiquetas ni releases: la 1.0.0 nunca se etiquetó y `release.yml` no se ha
+>     ejecutado nunca.
+> - **Comprobado en local:**
+>   - 269 tests, ninguno omitido (con el archivo real), en 111 s;
+>   - `dist\D2ScriptViewer.exe` (11,2 MB) con PyInstaller 6.22.3: la autoprueba dice
+>     «D2ScriptViewer 1.1.0 · Python 3.12.5 · congelado» y todo correcto, código de salida 0;
+>   - la rueda no se construyó porque aquí no está setuptools; la construye el workflow, y
+>     `test_repository` comprueba que su versión sale de `__version__`.
+> - **Lo que hace el usuario:**
+>   1. `git push origin main`;
+>   2. opcionalmente, una prueba en seco con *Run workflow* en Actions → release, que construye
+>      y sube el `.exe` como artefacto sin publicar (el paso de publicar solo corre con una
+>      etiqueta);
+>   3. `git tag -a v1.1.0 -m "D2ScriptViewer 1.1.0"` y `git push origin v1.1.0`.
+>
+>   Si el workflow falla, se borra la etiqueta (local y remota), se corrige y se vuelve a
+>   etiquetar.
+
 > **Fase 11 cerrada (2026-10-09): ir a una ruta.** Ctrl+G abre la barra «Ir a», que lee la ruta de
 > «Copiar ruta de la propiedad», `objeto · propiedad` (o `objeto::propiedad`) o el objeto solo, y
 > salta a esa fila. No cambia el formato ni el guardado, así que no necesita prueba en el juego.

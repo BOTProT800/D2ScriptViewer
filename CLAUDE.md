@@ -37,7 +37,10 @@ a 9 están cerradas. Fase 10 (búsqueda dentro del objeto) cerrada el 8 de octub
 barra en el panel de propiedades con un campo por columna, Ctrl+F para el objeto y Ctrl+Mayús+F
 para la búsqueda global; sus dos tests con el archivo real (`RealTreeSearchTests`) pasan. Fase 11
 (ir a una ruta) cerrada el 9 de octubre de 2026: Ctrl+G abre una barra «Ir a» que lee la ruta de
-«Copiar ruta de la propiedad» o `objeto · propiedad` y salta a esa fila. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+«Copiar ruta de la propiedad» o `objeto · propiedad` y salta a esa fila. Versión 1.1.0
+preparada el 7 de noviembre de 2026 (fases 10 y 11 y pruebas de audio). La 1.0.0 nunca se
+etiquetó, y `release.yml` aún no se ha ejecutado en GitHub. El repositorio es público. El push y
+la etiqueta `v1.1.0` los hace el usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
