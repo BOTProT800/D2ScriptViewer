@@ -13,12 +13,21 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
+from .. import vocabulary
 from ..document import Document, ObjectInfo
-from ..formats.obsp import kind_name
+from ..i18n import N_, term
 from . import theme
 
-GROUP_MODES = ("Carpeta", "Ruta", "Tipo")
-ALL_TYPES = "Todos los tipos"
+#: Modos de agrupar. El canónico es el que se guarda en ``config.json`` (``group_by``); el
+#: desplegable muestra su traducción (contexto «agrupar»).
+GROUP_MODES = (N_("Carpeta", "agrupar"), N_("Ruta", "agrupar"), N_("Tipo", "agrupar"))
+#: La primera opción del filtro de tipo, que no filtra; se muestra con ``_()``.
+ALL_TYPES = N_("Todos los tipos")
+
+
+def group_label(mode: str) -> str:
+    """Un modo de agrupar como se ve en el desplegable."""
+    return term(mode, "agrupar")
 #: Con tan pocos resultados se abren todos los grupos al filtrar.
 AUTO_EXPAND_LIMIT = 150
 _DUMMY = "dummy"
@@ -46,9 +55,11 @@ class ObjectTree(ttk.Frame):
         self._groups_by_iid: dict[str, _Group] = {}
         self._last_reported: int | None = None
         self._pending_refresh: str | None = None
+        #: Modo de agrupar con que se pintó la lista (se calcula una vez por repintado).
+        self._mode = GROUP_MODES[0]
 
-        self.group_var = tk.StringVar(value=GROUP_MODES[0])
-        self.type_var = tk.StringVar(value=ALL_TYPES)
+        self.group_var = tk.StringVar(value=group_label(GROUP_MODES[0]))
+        self.type_var = tk.StringVar(value=term(ALL_TYPES))
         self.class_var = tk.StringVar()
         self.filter_var = tk.StringVar()
         self.count_var = tk.StringVar(value="Sin archivo")
@@ -57,11 +68,12 @@ class ObjectTree(ttk.Frame):
         ttk.Label(self, textvariable=self.count_var, style="PanelMuted.TLabel").grid(row=0, column=2, columnspan=2, sticky="e")
 
         ttk.Label(self, text="Agrupar", style="PanelMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Combobox(self, textvariable=self.group_var, values=GROUP_MODES, state="readonly", width=9).grid(
+        ttk.Combobox(self, textvariable=self.group_var, values=[group_label(mode) for mode in GROUP_MODES],
+                     state="readonly", width=9).grid(
             row=1, column=1, sticky="ew", padx=(6, 8), pady=(8, 0)
         )
         ttk.Label(self, text="Tipo", style="PanelMuted.TLabel").grid(row=1, column=2, sticky="w", pady=(8, 0))
-        self.type_box = ttk.Combobox(self, textvariable=self.type_var, values=(ALL_TYPES,), state="readonly", width=22)
+        self.type_box = ttk.Combobox(self, textvariable=self.type_var, values=(term(ALL_TYPES),), state="readonly", width=22)
         self.type_box.grid(row=1, column=3, sticky="ew", padx=(6, 0), pady=(8, 0))
 
         ttk.Label(self, text="Clase", style="PanelMuted.TLabel").grid(row=2, column=0, sticky="w", pady=(6, 0))
@@ -92,6 +104,32 @@ class ObjectTree(ttk.Frame):
         for variable in (self.group_var, self.type_var, self.class_var, self.filter_var):
             variable.trace_add("write", lambda *_: self._schedule_refresh())
 
+    # --- Agrupación y filtros --------------------------------------------------------------
+
+    @property
+    def group_mode(self) -> str:
+        """El modo de agrupar canónico (``Carpeta``, ``Ruta`` o ``Tipo``), sea cual sea el idioma."""
+        shown = self.group_var.get()
+        return next((mode for mode in GROUP_MODES if group_label(mode) == shown or mode == shown), GROUP_MODES[0])
+
+    def set_group_mode(self, mode: str) -> None:
+        self.group_var.set(group_label(mode if mode in GROUP_MODES else GROUP_MODES[0]))
+
+    def filters(self) -> tuple[str, int | None, str, str]:
+        """(modo de agrupar, tipo, clase, texto), sin depender del idioma (al cambiarlo)."""
+        return self.group_mode, self._kind_filter(), self.class_var.get(), self.filter_var.get()
+
+    def restore_filters(self, filters: tuple[str, int | None, str, str]) -> None:
+        """Vuelve a poner los filtros de :meth:`filters` y repinta la lista una sola vez."""
+        mode, kind, class_text, text = filters
+        self.set_group_mode(mode)
+        shown_kind = next((value for value in self.type_box.cget("values") if kind is not None
+                           and str(value).startswith(f"{kind} · ")), term(ALL_TYPES))
+        self.type_var.set(shown_kind)
+        self.class_var.set(class_text)
+        self.filter_var.set(text)
+        self.refresh()
+
     # --- Datos ---------------------------------------------------------------------------
 
     def set_document(self, document: Document | None) -> None:
@@ -99,11 +137,11 @@ class ObjectTree(ttk.Frame):
         self.modified = set()
         self._last_reported = None
         if document is None:
-            self.type_box.configure(values=(ALL_TYPES,))
+            self.type_box.configure(values=(term(ALL_TYPES),))
             self.class_box.configure(values=())
         else:
             kinds = sorted({info.entry.kind for info in document.objects})
-            self.type_box.configure(values=(ALL_TYPES, *[f"{kind} · {kind_name(kind)}" for kind in kinds]))
+            self.type_box.configure(values=(term(ALL_TYPES), *[f"{kind} · {vocabulary.kind_label(kind)}" for kind in kinds]))
             classes = sorted({info.class_name for info in document.objects if info.class_name}, key=str.casefold)
             self.class_box.configure(values=classes)
         self._reset_filters()
@@ -121,7 +159,7 @@ class ObjectTree(ttk.Frame):
                 self.tree.item(iid, text=self._leaf_text(info), tags=self._leaf_tags(info))
 
     def _reset_filters(self) -> None:
-        for variable, value in ((self.type_var, ALL_TYPES), (self.class_var, ""), (self.filter_var, "")):
+        for variable, value in ((self.type_var, term(ALL_TYPES)), (self.class_var, ""), (self.filter_var, "")):
             if variable.get() != value:
                 variable.set(value)
 
@@ -137,7 +175,7 @@ class ObjectTree(ttk.Frame):
 
     def _kind_filter(self) -> int | None:
         value = self.type_var.get()
-        if value == ALL_TYPES or " · " not in value:
+        if " · " not in value:
             return None
         return int(value.split(" · ", 1)[0])
 
@@ -154,7 +192,7 @@ class ObjectTree(ttk.Frame):
         # En el juego toda ruta es «directorio/objeto»: el directorio siempre es el
         # último nivel de agrupación, para que ningún grupo tenga miles de objetos.
         directory = info.path.split("/")[:-1] or ["(raíz)"]
-        mode = self.group_var.get()
+        mode = self._mode
         if mode == "Ruta":
             return directory
         if mode == "Tipo":
@@ -178,6 +216,7 @@ class ObjectTree(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         self._groups_by_iid = {}
         self._root = _Group("")
+        self._mode = self.group_mode
         if self.document is None:
             self.count_var.set("Sin archivo")
             return

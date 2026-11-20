@@ -1,5 +1,43 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 12 abierta (2026-11-19): interfaz en inglés, con el idioma seleccionable.** La
+> herramienta va a Nexus Mods, cuyo público habla casi todo inglés. El usuario aprobó estas
+> decisiones:
+>
+> 1. **Mecanismo:** `_()`, `ngettext()` y `pgettext()` en `i18n.py`, con la clave en el español
+>    del código y el catálogo inglés en un módulo de Python (`i18n_en.py`). No hay archivos de
+>    datos, así que el `.spec` y `BUNDLED` no cambian; `MODULES` sí. Se descartaron `gettext` con
+>    `.po`/`.mo` (compilar e incluir archivos) y las claves simbólicas (el código deja de leerse).
+> 2. **El núcleo sigue en español canónico.** Las etiquetas de las rutas, los tipos, los
+>    mnemónicos y las filas de los scripts forman parte de lo que se guarda, se exporta o se
+>    escribe en un parche, y de las huellas (`bod.fingerprint`). Por eso no se traducen al
+>    construirse: los traduce `vocabulary.py` al mostrarlos. Los textos con números de los
+>    scripts son `i18n.Deferred`, un `str` con el texto de siempre que además sabe mostrarse
+>    traducido. Los mensajes (errores, avisos, resúmenes) se componen en el idioma activo.
+> 3. **Idioma inicial:** `D2SV_LANG` (nunca se guarda), luego `language` en `config.json`
+>    (solo se guarda al elegirlo en el menú) y luego el idioma de la pantalla de Windows
+>    (`GetUserDefaultUILanguage`): español si el idioma principal es el español; si no, inglés.
+> 4. **Menú «Idioma / Language»**, antes de Ayuda, con «English» y «Español». El cambio se
+>    aplica en caliente: reconstruye menús y paneles sin cerrar la ventana y conserva el
+>    documento, los cambios sin guardar, deshacer y rehacer, el objeto y la fila, el historial,
+>    el índice, los filtros y la búsqueda. Medido con el archivo real: 154–167 ms al proponerlo,
+>    frente a 1,6–1,9 s de arranque en frío del `.exe` más 2,3 s de índice al reiniciar.
+> 5. **Rutas:** la etiqueta canónica, la de hoy, es la de los parches. El árbol, «Copiar ruta» y
+>    los mensajes usan el idioma de la interfaz (`Functions.onInit.0x004E`, `[3].value`,
+>    `(root)`), y Ctrl+G acepta los dos vocabularios en los dos idiomas. Solo son vocabulario los
+>    campos de la raíz de un script (11: también `Versión`, `Grupo` y `Nombre`), `Parámetros` y
+>    los hijos de un par.
+> 6. **Alcance:** la GUI y todo mensaje del núcleo que llegue a ella. La CLI sigue entera en
+>    español (nunca llama a `set_language`), y el informe de la autoprueba también.
+> 7. **Documentación en inglés** (`README.en.md` y `GUIA_MODDER.en.md`) en esta fase, como último
+>    paso, tras la revisión de la interfaz.
+> 8. **Presentación:** la columna Tipo se traduce y la búsqueda en el objeto compara lo que se
+>    ve. Miles: «7,862» en inglés y «7 862» con espacio duro en el español de la interfaz (la CLI
+>    conserva la coma). Título y «Acerca de» traducidos. Los diálogos nativos de Windows siguen
+>    el idioma del sistema.
+>
+> Criterios en la fase 12 de la sección 7.
+
 > **Versión 1.1.0 publicada (2026-11-19).** El usuario pidió esta vez que el push y la etiqueta
 > los hiciera Claude. La etiqueta anotada `v1.1.0` apunta a `b8164fd`.
 >
@@ -1339,6 +1377,61 @@ Decisiones del 2026-10-09 en la nota del principio.
   - `CLAUDE.md`, `CHANGELOG.md` (`[Unreleased]`) y el README;
   - `GUIA_MODDER.md`: el atajo, el menú, y que las rutas de la tabla «Lo que ya está probado»
     se pueden pegar en Ctrl+G.
+
+### Fase 12 — Interfaz en inglés, con el idioma seleccionable
+
+Decisiones del 2026-11-19 en la nota del principio.
+
+- **`i18n.py`:** `_()`, `ngettext()`, `pgettext()`, `N_()` (marca un texto que se traduce al
+  usarlo), `term()` (la única búsqueda con un texto variable, para el vocabulario declarado con
+  `N_`), `Deferred`, `shown()`, `set_language()`, `reset()` (el estado de la CLI) e
+  `initial_language()`. `_()` devuelve una plantilla cuyo `format` usa el separador de miles del
+  idioma en `{n:,}`.
+- **`i18n_en.py`:** `MESSAGES` (texto o `(contexto, texto)`) y `PLURALS`.
+- **`vocabulary.py`:** las columnas Nombre, Tipo y Valor como se ven, `PathText` (una ruta
+  canónica que se muestra traducida, también en las descripciones de deshacer) y `ShownNames`,
+  los mensajes y alias de Ctrl+G.
+- **GUI:** el menú «Idioma / Language», el cambio en caliente (`ViewerApp.change_language`) y la
+  elección guardada.
+
+**Hecho cuando:**
+
+1. `i18n.py`, `i18n_en.py` y `vocabulary.py` usan solo la biblioteca estándar; el `.spec` y
+   `BUNDLED` no cambian, y `MODULES` los incluye.
+2. **Catálogo** (`tests/test_i18n.py`, con `ast` sobre todo el paquete):
+   - cada `_`, `ngettext`, `pgettext`, `N_` y `Deferred` lleva textos literales;
+   - todo texto tiene traducción, con los mismos marcadores (nombre y formato) y la misma forma
+     de plural, y no sobran entradas;
+   - ninguna traducción lleva tildes, «ñ», «¿», «¡» ni «»»;
+   - nadie asigna a `_`.
+3. **Restos estáticos:** ningún literal con marcas del español fuera de `_()` en los módulos que
+   llegan a la GUI, salvo una lista explícita de vocabulario canónico.
+4. **GUI en inglés** (fixtures) sin restos en español: todos los menús, cada fila de cada
+   objeto, los detalles, la búsqueda global, Cambios pendientes, el selector de referencias,
+   Rellenar nulo, los errores de Ctrl+G, el contador de la barra y la barra de estado tras
+   editar, deshacer y guardar.
+5. **Persistencia:** primer arranque con Windows en español y en inglés (simulado); elegir en
+   el menú lo guarda; una ventana nueva arranca en ese idioma; un valor no válido se ignora;
+   `D2SV_LANG` manda.
+6. **Cambio en caliente:** se conservan el documento, los cambios sin guardar, deshacer y
+   rehacer (traducidos), el objeto y la fila; se rechaza mientras se guarda; los paneles
+   sustituidos se liberan.
+7. **Parches:** uno creado en español se aplica en inglés y al revés, y el JSON sale idéntico
+   en los dos idiomas (salvo `creado`), con fixtures y con el archivo real.
+8. **Guardar y exportar:** la misma edición guardada en los dos idiomas da el mismo SHA, y la
+   exportación JSON y CSV es idéntica, también con el archivo real.
+9. **Ctrl+G:** `Funciones…` y `Functions…`, `clave` y `key`, en los dos idiomas; «Copiar ruta»
+   copia en el idioma de la interfaz; con el archivo real, ida y vuelta de la etiqueta inglesa
+   en todas las filas.
+10. **Búsqueda en el objeto en inglés:** compara con los tipos traducidos.
+11. **CLI:** su salida no cambia.
+12. **Ejecutable:** el `.exe` se construye y pasa la autoprueba ampliada.
+13. **Suite:** todos los tests en verde, ninguno omitido con `D2SV_OBSP`, código de salida 0.
+14. **Documentación:** el plan (nota y secciones 6 y 7), `CLAUDE.md` (la regla del idioma y el
+    mapa del código), `CHANGELOG.md` (`[Unreleased]`), el README y `GUIA_MODDER.md` (el menú),
+    y `README.en.md` y `GUIA_MODDER.en.md`. `CREDITS.md` no cambia.
+
+No hace falta prueba en el juego: no cambia el formato ni el guardado.
 
 ## 8. Estrategia de pruebas
 

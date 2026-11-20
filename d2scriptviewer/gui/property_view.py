@@ -30,8 +30,9 @@ from bisect import bisect_left, bisect_right
 from tkinter import ttk
 from typing import Callable
 
-from .. import edits, search
+from .. import edits, i18n, search, vocabulary
 from ..formats import bod, script
+from ..i18n import _
 from ..wording import count as count_text
 from . import theme
 from .editors import InlineEditor
@@ -161,7 +162,7 @@ class PropertyView(ttk.Frame):
 
     def _build_search_bar(self) -> None:
         self.search_name_var = tk.StringVar()
-        self.search_type_var = tk.StringVar(value=search.ANY_TYPE)
+        self.search_type_var = tk.StringVar(value=i18n.term(search.ANY_TYPE))
         self.search_value_var = tk.StringVar()
         self.search_count_var = tk.StringVar(value="")
         bar = ttk.Frame(self, style="Panel.TFrame")
@@ -172,7 +173,7 @@ class PropertyView(ttk.Frame):
         self.search_name.grid(row=0, column=1, sticky="ew", padx=(4, 8))
         ttk.Label(bar, text="Tipo", style="PanelMuted.TLabel").grid(row=0, column=2, sticky="w")
         self.search_type = ttk.Combobox(
-            bar, textvariable=self.search_type_var, values=(search.ANY_TYPE,), width=9, height=20,
+            bar, textvariable=self.search_type_var, values=(i18n.term(search.ANY_TYPE),), width=9, height=20,
             postcommand=self._fill_type_choices,
         )
         self.search_type.grid(row=0, column=3, sticky="ew", padx=(4, 8))
@@ -369,7 +370,7 @@ class PropertyView(ttk.Frame):
             if len(item) == 2 and self.tree.exists(iid):
                 node, path = item
                 self.tree.item(
-                    iid, values=(bod.type_text(node), self._value_text(node)), tags=self._tags(node, path)
+                    iid, values=(vocabulary.type_text(node), self._value_text(node)), tags=self._tags(node, path)
                 )
 
     def set_hint(self, text: str, kind: str = "info", *, hold: bool = False) -> None:
@@ -399,8 +400,10 @@ class PropertyView(ttk.Frame):
         return (label,) if label in theme.VALUE_COLORS else ()
 
     def _insert_node(self, parent: str, label: str, node: object, path: tuple) -> None:
+        """Inserta la fila ``path``; ``label`` es la etiqueta ya como se ve (:func:`.vocabulary.row_label`)."""
         iid = self.tree.insert(
-            parent, "end", text=label, values=(bod.type_text(node), self._value_text(node)), tags=self._tags(node, path)
+            parent, "end", text=label, values=(vocabulary.type_text(node), self._value_text(node)),
+            tags=self._tags(node, path),
         )
         self._items[iid] = (node, path)
         self._iid_by_path[path] = iid
@@ -412,12 +415,13 @@ class PropertyView(ttk.Frame):
         if len(kids) > CHUNK:
             for start in range(0, len(kids), CHUNK):
                 end = min(start + CHUNK, len(kids))
-                iid = self.tree.insert(parent, "end", text=f"[{start}…{end - 1}]", values=("tramo", ""), tags=("container",))
+                chunk = vocabulary.shown_term(vocabulary.CHUNK, vocabulary.TYPE)
+                iid = self.tree.insert(parent, "end", text=f"[{start}…{end - 1}]", values=(chunk, ""), tags=("container",))
                 self._items[iid] = (node, path, start, end)
                 self.tree.insert(iid, "end", text="…", tags=(_DUMMY,))
             return
         for index, (label, child) in enumerate(kids):
-            self._insert_node(parent, label, child, path + (index,))
+            self._insert_node(parent, vocabulary.row_label(self.document, path, node, label), child, path + (index,))
 
     def _populate(self, iid: str) -> None:
         if iid in self._populated or iid not in self._items:
@@ -430,7 +434,7 @@ class PropertyView(ttk.Frame):
             kids = bod.children(node)
             for index in range(start, end):
                 label, child = kids[index]
-                self._insert_node(iid, label, child, path + (index,))
+                self._insert_node(iid, vocabulary.row_label(self.document, path, node, label), child, path + (index,))
         else:
             node, path = item
             self._insert_children(iid, node, path)
@@ -479,10 +483,21 @@ class PropertyView(ttk.Frame):
         """Los tipos del objeto abierto, calculados al desplegar la lista."""
         if self._search_types is None:
             self._search_types = search.tree_types(self.document) if self.document is not None else []
-        self.search_type.configure(values=(search.ANY_TYPE, *self._search_types))
+        self.search_type.configure(values=(i18n.term(search.ANY_TYPE), *self._search_types))
 
     def _query(self) -> tuple[str, str, str]:
         return self.search_name_var.get(), self.search_type_var.get(), self.search_value_var.get()
+
+    def search_query(self) -> tuple[str, str, str]:
+        """(Nombre, Tipo, Valor) de la barra de búsqueda, tal como están escritos."""
+        return self._query()
+
+    def set_search_query(self, name: str, type_name: str, value: str) -> None:
+        """Rellena la barra sin buscar todavía: el objeto que se muestre después la usará."""
+        self.search_name_var.set(name)
+        self.search_type_var.set(type_name)
+        self.search_value_var.set(value)
+        self.cancel_pending()
 
     def _schedule_search(self) -> None:
         self.cancel_pending()
@@ -735,10 +750,12 @@ class PropertyView(ttk.Frame):
         self._add_structure_entries(menu, node, path)
         menu.add_separator()
         menu.add_command(label="Copiar valor", command=lambda: self._copy(self._value_text(node)))
-        menu.add_command(label="Copiar ruta de la propiedad", command=lambda: self._copy(bod.path_label(self.document, path)))
+        document = self.document
+        menu.add_command(label="Copiar ruta de la propiedad",
+                         command=lambda: self._copy(vocabulary.path_label(document, path)))
         if self.full_label is not None:
             full_label = self.full_label
-            menu.add_command(label="Copiar ruta completa", command=lambda: self._copy(full_label(path)))
+            menu.add_command(label="Copiar ruta completa", command=lambda: self._copy(i18n.text(full_label(path))))
         return menu
 
     def structure_actions(self, node: object, path: tuple) -> list[str]:

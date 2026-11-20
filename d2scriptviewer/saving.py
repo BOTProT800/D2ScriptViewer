@@ -41,6 +41,7 @@ from .errors import D2ScriptViewerError, FormatError, SaveError
 from .formats import bod, script
 from .formats.hashes import document_names, first_wrong_name, name_hash
 from .formats.obsp import STEAM_ORIGINAL_SHA256, ObspFile
+from .i18n import _
 from .validation import validate
 
 ORIGINAL_SUFFIX = ".original.obsp"
@@ -111,13 +112,14 @@ def file_status(path: Path | None, data_sha256: str) -> FileStatus:
     copy = original_copy_path(path) if path is not None and not is_original_copy(path) else None
     has_copy = copy is not None and copy.is_file()
     if path is not None and is_original_copy(path):
-        steam = " (original de Steam)" if data_sha256 == STEAM_ORIGINAL_SHA256 else ""
-        return FileStatus("original-copy", f"Copia del original{steam}: solo «Guardar como»", None)
+        if data_sha256 == STEAM_ORIGINAL_SHA256:
+            return FileStatus("original-copy", _("Copia del original (original de Steam): solo «Guardar como»"), None)
+        return FileStatus("original-copy", _("Copia del original: solo «Guardar como»"), None)
     if data_sha256 == STEAM_ORIGINAL_SHA256:
-        return FileStatus("steam", "Original de Steam", copy if has_copy else None)
+        return FileStatus("steam", _("Original de Steam"), copy if has_copy else None)
     if has_copy:
-        return FileStatus("modified", f"Modificado (copia del original en {copy.name})", copy)
-    return FileStatus("unknown", "No es el original de Steam y no hay copia del original", None)
+        return FileStatus("modified", _("Modificado (copia del original en {copy})").format(copy=copy.name), copy)
+    return FileStatus("unknown", _("No es el original de Steam y no hay copia del original"), None)
 
 
 # --- Construcción y autoverificación ----------------------------------------------------------
@@ -224,7 +226,7 @@ def _verify_script(position: int, original: bytes, blob: bytes) -> None:
 
 
 def _locked_message(path: Path) -> str:
-    return f"{path.name} está abierto por otro programa. Cierra Darksiders II y vuelve a intentarlo."
+    return _("{name} está abierto por otro programa. Cierra Darksiders II y vuelve a intentarlo.").format(name=path.name)
 
 
 def describe_os_error(error: OSError, path: Path) -> str:
@@ -347,14 +349,20 @@ class SaveResult:
     warnings: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        lines = [f"Guardado {self.path.name}: {self.size:,} bytes, SHA-256 {self.sha256[:16]}…"]
+        lines = [_("Guardado {name}: {size:,} bytes, SHA-256 {sha}…").format(
+            name=self.path.name, size=self.size, sha=self.sha256[:16])]
         if self.original_created and self.original_copy is not None:
-            origin = "original de Steam" if self.original_is_steam else "archivo previo, que ya venía modificado"
-            lines.append(f"Copia del original creada: {self.original_copy.name} ({origin}), verificada y de solo lectura.")
+            if self.original_is_steam:
+                created = _("Copia del original creada: {copy} (original de Steam), verificada y de solo lectura.")
+            else:
+                created = _("Copia del original creada: {copy} (archivo previo, que ya venía modificado), "
+                            "verificada y de solo lectura.")
+            lines.append(created.format(copy=self.original_copy.name))
         elif self.original_copy is not None:
-            lines.append(f"La copia del original ({self.original_copy.name}) ya existía y no se ha tocado.")
+            lines.append(_("La copia del original ({copy}) ya existía y no se ha tocado.").format(
+                copy=self.original_copy.name))
         if self.backup is not None:
-            lines.append(f"Versión anterior guardada en {BACKUP_DIR}\\{self.backup.name}.")
+            lines.append(_("Versión anterior guardada en {folder}\\{name}.").format(folder=BACKUP_DIR, name=self.backup.name))
         lines.extend(self.warnings)
         return "\n".join(lines)
 

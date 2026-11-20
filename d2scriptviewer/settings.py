@@ -18,7 +18,7 @@ OBSP_ENV = "D2SV_OBSP"
 #: Solo se conserva lo que el usuario elige a mano. Cualquier otra clave del
 #: archivo se descarta al leer, para que una versión anterior o un fichero
 #: manipulado no inyecten estado en la aplicación.
-KNOWN_KEYS = frozenset({"last_file", "rotating_backups", "geometry", "group_by"})
+KNOWN_KEYS = frozenset({"last_file", "rotating_backups", "geometry", "group_by", "language"})
 
 
 def find_default_obsp() -> Path | None:

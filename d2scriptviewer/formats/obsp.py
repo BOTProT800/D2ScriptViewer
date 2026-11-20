@@ -17,6 +17,7 @@ from typing import Mapping, Sequence
 
 from ..binary import TEXT_ENCODING, ByteReader
 from ..errors import FormatError
+from ..i18n import N_, Deferred
 
 MAGIC = b"OBSP"
 HEADER = struct.Struct("<4sBIIIIII")
@@ -26,7 +27,7 @@ STRING_HEAD = struct.Struct("<QI")
 #: Categoría del blob según el byte ``tipo`` del índice.
 KIND_NAMES = {
     0: "Script",
-    1: "Instancia",
+    1: N_("Instancia", "categoría"),
     2: "CharacterMoveStateList",
     3: "SoundList",
     4: "AnimationList",
@@ -46,7 +47,7 @@ STEAM_ORIGINAL_SIZE = 18_334_463
 
 
 def kind_name(kind: int) -> str:
-    return KIND_NAMES.get(kind, f"Tipo {kind}")
+    return KIND_NAMES.get(kind) or Deferred("Tipo {kind}", context="categoría", kind=kind)
 
 
 def identity_text(group: int, object_id: int) -> str:
@@ -113,7 +114,7 @@ class ObspFile:
 
         reader = ByteReader(data, HEADER.size, strings_end, label="tabla de cadenas")
         strings: dict[int, str] = {}
-        for _ in range(string_count):
+        for _index in range(string_count):
             value_hash, length = reader.unpack(STRING_HEAD)
             strings[value_hash] = reader.text(length)
         if reader.remaining():

@@ -211,7 +211,7 @@ def _same_shape(old: object, new: object) -> bool:
 def _lcs(old: list[bytes], new: list[bytes]) -> tuple[set[int], set[int]]:
     """Índices emparejados por la subsecuencia común más larga."""
     rows, columns = len(old), len(new)
-    lengths = [[0] * (columns + 1) for _ in range(rows + 1)]
+    lengths = [[0] * (columns + 1) for _index in range(rows + 1)]
     for i in range(rows - 1, -1, -1):
         row, below = lengths[i], lengths[i + 1]
         for j in range(columns - 1, -1, -1):

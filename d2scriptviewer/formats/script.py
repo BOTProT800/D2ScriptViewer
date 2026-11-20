@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 
 from ..binary import ByteReader, U32
 from ..errors import FormatError
+from ..i18n import N_, Deferred
 from ..wording import count
 from . import bod, bytecode
 from .bod import BodDocument, BodObject, ClassRef, Field, Name, Note
@@ -48,9 +49,25 @@ MEMBER_HAS_DEFAULT = 0x08
 
 #: Nombre del tipo declarado de un miembro (son los tags BOD; el 1 no se conoce).
 MEMBER_TYPES = {
-    0x02: "int32", 0x03: "float32", 0x04: "bool", 0x05: "cadena", 0x07: "objeto",
-    0x09: "lista", 0x0A: "mapa", 0x0B: "tupla",
+    0x02: "int32", 0x03: "float32", 0x04: "bool", 0x05: N_("cadena", "tipo"), 0x07: N_("objeto", "tipo"),
+    0x09: N_("lista", "tipo"), 0x0A: N_("mapa", "tipo"), 0x0B: N_("tupla", "tipo"),
 }
+
+#: Campos fijos de la raíz del árbol de presentación de un script (:func:`present`). Son
+#: etiquetas de ruta canónicas: las guardan los parches y la interfaz las traduce al mostrarlas.
+VERSION = N_("Versión", "ruta")
+SYMBOLS = N_("Símbolos", "ruta")
+PATH_HASH = N_("Hash de ruta", "ruta")
+GROUP = N_("Grupo", "ruta")
+NAME = N_("Nombre", "ruta")
+BASE_CLASS = N_("Clase base", "ruta")
+MEMBERS = N_("Miembros", "ruta")
+INITIAL_VALUES = N_("Valores iniciales", "ruta")
+FUNCTIONS = N_("Funciones", "ruta")
+STATES = N_("Estados", "ruta")
+ROOT_FIELDS = (VERSION, SYMBOLS, PATH_HASH, GROUP, NAME, BASE_CLASS, MEMBERS, INITIAL_VALUES, FUNCTIONS, STATES)
+#: El primer campo de cada función: su número de parámetros.
+PARAMETERS = N_("Parámetros", "ruta")
 
 EDITABLE_VALUES = (bod.Int32, bod.Float32, bod.Bool)
 
@@ -82,7 +99,7 @@ def parse_header(data: bytes) -> ScriptHeader:
     if count > len(data) // SYMBOL_HEAD.size:
         raise FormatError(f"Número de símbolos imposible: {count}")
     symbols = []
-    for _ in range(count):
+    for _index in range(count):
         value_hash, length = reader.unpack(SYMBOL_HEAD)
         symbols.append(Symbol(value_hash, reader.text(length)))
     path_hash, group = reader.unpack(TRAILER)
@@ -118,7 +135,7 @@ class Member:
 
     @property
     def type_label(self) -> str:
-        return MEMBER_TYPES.get(self.type, f"tipo {self.type}")
+        return MEMBER_TYPES.get(self.type) or Deferred("tipo {number}", context="tipo", number=self.type)
 
 
 @dataclass
@@ -196,7 +213,7 @@ class _Body:
     def functions(self) -> list[Function]:
         (count,) = self.unpack(U32)
         result = []
-        for _ in range(count):
+        for _index in range(count):
             value_hash, size = self.unpack(FUNCTION_HEAD)
             code = self.data[self.pos:self.pos + size]
             if len(code) != size:
@@ -217,17 +234,17 @@ def parse(data: bytes) -> Script:
     try:
         name_hash, base_hash = body.unpack(CLASS_HASHES)
         members = []
-        for _ in range(body.unpack(U32)[0]):
+        for _index in range(body.unpack(U32)[0]):
             value_hash, flags, kind = body.unpack(MEMBER_HEAD)
             default = body.value() if flags & MEMBER_HAS_DEFAULT else None
             members.append(Member(body.name(value_hash), flags, kind, default))
         initial_values = []
-        for _ in range(body.unpack(U32)[0]):
+        for _index in range(body.unpack(U32)[0]):
             (value_hash,) = body.unpack(HASH)
             initial_values.append(InitialValue(body.name(value_hash), body.value()))
         functions = body.functions()
         states = []
-        for _ in range(body.unpack(U32)[0]):
+        for _index in range(body.unpack(U32)[0]):
             (value_hash,) = body.unpack(HASH)
             states.append(State(body.name(value_hash), body.functions()))
         script = Script(
@@ -392,8 +409,8 @@ def _mirror(node: object) -> object:
 
 def _function_node(function: Function) -> bod.Value:
     if function.params is None:
-        return Note("sin código", "función")
-    fields = [_field("Parámetros", Note(str(function.params), "u8"))]
+        return Note(Deferred("sin código"), N_("función", "tipo"))
+    fields = [_field(PARAMETERS, Note(str(function.params), "u8"))]
     for instruction in function.instructions:
         label = f"0x{instruction.offset:04X}"
         if instruction.is_literal:
@@ -401,11 +418,13 @@ def _function_node(function: Function) -> bod.Value:
         else:
             fields.append(_field(label, Note(bytecode.operand_text(instruction), bytecode.mnemonic(instruction))))
     size = len(function.code)
-    return _object(f"función · {count(function.params, 'parámetro')} · {size:,} bytes", fields)
+    params = Deferred("{count:,} parámetro", plural="{count:,} parámetros", count=function.params)
+    return _object(Deferred("función · {params} · {size:,} bytes", params=params, size=size), fields)
 
 
 def _functions_node(functions: list[Function]) -> BodObject:
-    return _object(f"{len(functions)} funciones", [_field(f.name.text, _function_node(f)) for f in functions])
+    label = Deferred("{count} función", plural="{count} funciones", count=len(functions))
+    return _object(label, [_field(f.name.text, _function_node(f)) for f in functions])
 
 
 def present(script: Script) -> ScriptTree:
@@ -416,29 +435,32 @@ def present(script: Script) -> ScriptTree:
             members.append(_field(member.name.text, _mirror(member.default)))  # type: ignore[arg-type]
         else:
             members.append(
-                _field(member.name.text, Note(f"sin valor por defecto · banderas 0x{member.flags:02X}", member.type_label))
+                _field(member.name.text, Note(Deferred("sin valor por defecto · banderas 0x{flags:02X}", flags=member.flags),
+                                              member.type_label))
             )
     root = _object(
         "script",
         [
-            _field("Versión", Note(str(header.version), "u32")),
-            _field("Símbolos", Note(f"{len(header.symbols):,} (ver pestaña Script)", "u32")),
-            _field("Hash de ruta", Note(f"{header.path_hash:016X}", "u64")),
-            _field("Grupo", Note(str(header.group), "u32")),
-            _field("Nombre", Note(script.name.text, "nombre")),
-            _field("Clase base", Note(script.base.text, "nombre")),
-            _field("Miembros", _object(f"{len(script.members)} miembros", members)),
+            _field(VERSION, Note(str(header.version), "u32")),
+            _field(SYMBOLS, Note(Deferred("{count:,} (ver pestaña Script)", count=len(header.symbols)), "u32")),
+            _field(PATH_HASH, Note(f"{header.path_hash:016X}", "u64")),
+            _field(GROUP, Note(str(header.group), "u32")),
+            _field(NAME, Note(script.name.text, bod.HashedString.type_label)),
+            _field(BASE_CLASS, Note(script.base.text, bod.HashedString.type_label)),
+            _field(MEMBERS, _object(Deferred("{count} miembro", plural="{count} miembros", count=len(script.members)),
+                                    members)),
             _field(
-                "Valores iniciales",
+                INITIAL_VALUES,
                 _object(
-                    f"{len(script.initial_values)} valores",
+                    Deferred("{count} valor", plural="{count} valores", count=len(script.initial_values)),
                     [_field(item.name.text, _mirror(item.value)) for item in script.initial_values],  # type: ignore[arg-type]
                 ),
             ),
-            _field("Funciones", _functions_node(script.functions)),
+            _field(FUNCTIONS, _functions_node(script.functions)),
             _field(
-                "Estados",
-                _object(f"{len(script.states)} estados", [_field(s.name.text, _functions_node(s.functions)) for s in script.states]),
+                STATES,
+                _object(Deferred("{count} estado", plural="{count} estados", count=len(script.states)),
+                        [_field(s.name.text, _functions_node(s.functions)) for s in script.states]),
             ),
         ],
     )

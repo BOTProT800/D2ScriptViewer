@@ -27,13 +27,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import diffing, edits
+from . import diffing, edits, i18n, vocabulary
 from .diffing import Change
 from .edits import EditGroup, InsertItem, MoveItem, RemoveItem, ReplaceTree, ReplaceValue, State, ValueEdit
 from .errors import EditError, PathError
 from .formats import bod, script
 from .formats.hashes import HashDictionary
-from .formats.obsp import STEAM_ORIGINAL_SHA256, IndexEntry, ObspFile, identity_text, kind_name, rebuild
+from .formats.obsp import STEAM_ORIGINAL_SHA256, IndexEntry, ObspFile, identity_text, rebuild
+from .i18n import Deferred
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,8 @@ class ObjectInfo:
 
     @property
     def kind_label(self) -> str:
-        return kind_name(self.entry.kind)
+        """La categoría como se ve en la interfaz; la canónica es :func:`.formats.obsp.kind_name`."""
+        return vocabulary.kind_label(self.entry.kind)
 
     @property
     def is_script(self) -> bool:
@@ -292,12 +294,17 @@ class Document:
             )
         return node
 
-    def property_label(self, position: int, path: tuple) -> str:
-        return bod.path_label(self.bod(position), path)
+    def property_label(self, position: int, path: tuple) -> vocabulary.PathText:
+        """La ruta de la propiedad: canónica como ``str``; :func:`.i18n.shown` la da como se ve."""
+        return vocabulary.path_text(self.bod(position), path)
 
-    def full_label(self, position: int, path: tuple) -> str:
-        """``objeto · propiedad``: lo que copia «Copiar ruta completa» y lee :meth:`parse_location`."""
-        return f"{self.objects[position].label()}{FULL_LABEL_SEPARATOR}{self.property_label(position, path)}"
+    def full_label(self, position: int, path: tuple) -> vocabulary.PathText:
+        """``objeto · propiedad``: lo que copia «Copiar ruta completa» y lee :meth:`parse_location`.
+
+        Como ``str`` es la ruta canónica; :func:`.i18n.shown` la da en el idioma de la interfaz.
+        """
+        prefix = f"{self.objects[position].label()}{FULL_LABEL_SEPARATOR}"
+        return vocabulary.path_text(self.bod(position), path, prefix)
 
     # --- Ir a una ruta (fase 11) ----------------------------------------------------------
 
@@ -369,7 +376,9 @@ class Document:
         if location.position is not None:
             return True
         tree = self.cached_bod(position) if position is not None else None
-        return tree is not None and bool(location.steps) and bod.find_path(tree, list(location.steps[:1])).complete
+        if tree is None or not location.steps:
+            return False
+        return bod.find_path(tree, list(location.steps[:1]), vocabulary.NAMES).complete
 
     def edit(self, position: int, path: tuple, state: State) -> EditGroup | None:
         """Aplica un estado nuevo ya validado; devuelve ``None`` si no cambia nada."""
@@ -379,7 +388,8 @@ class Document:
             return None
         if isinstance(node, bod.ExternalRef) and state not in self._by_identity:
             raise EditError(f"No existe ningún objeto {identity_text(*state)} en este archivo")  # type: ignore[misc]
-        return self._push(EditGroup((ValueEdit(position, path, before, state),), f"Editar {self.full_label(position, path)}"))
+        description = Deferred("Editar {label}", label=self.full_label(position, path))
+        return self._push(EditGroup((ValueEdit(position, path, before, state),), description))
 
     def edit_text(
         self, position: int, path: tuple, text: str, dictionary: HashDictionary | None = None
@@ -393,7 +403,7 @@ class Document:
             if change.kind == "valor" and change.path == path:
                 node = self.node_at(position, path)
                 operation = ValueEdit(position, path, edits.get_state(node), change.original_state)
-                return self._push(EditGroup((operation,), f"Revertir {self.full_label(position, path)}"))
+                return self._push(EditGroup((operation,), Deferred("Revertir {label}", label=self.full_label(position, path))))
         return None
 
     def revert_object(self, position: int) -> EditGroup | None:
@@ -401,7 +411,7 @@ class Document:
             return None
         fresh = self._decode(position)
         operation = ReplaceTree(position, self.bod(position), fresh)
-        return self._push(EditGroup((operation,), f"Revertir {self.objects[position].label()}"))
+        return self._push(EditGroup((operation,), Deferred("Revertir {label}", label=self.objects[position].label())))
 
     # --- Ediciones estructurales (fase 5) ------------------------------------------------
 
@@ -420,12 +430,12 @@ class Document:
         node, _items = self._sequence_item(position, path)
         copy = bod.clone(node)
         operation = InsertItem(position, path[:-1], path[-1] + 1, copy)
-        return self._push(EditGroup((operation,), f"Duplicar {self.full_label(position, path)}"))
+        return self._push(EditGroup((operation,), Deferred("Duplicar {label}", label=self.full_label(position, path))))
 
     def remove_item(self, position: int, path: tuple) -> EditGroup:
         node, _items = self._sequence_item(position, path)
         label = self.full_label(position, path)
-        return self._push(EditGroup((RemoveItem(position, path[:-1], path[-1], node),), f"Eliminar {label}"))
+        return self._push(EditGroup((RemoveItem(position, path[:-1], path[-1], node),), Deferred("Eliminar {label}", label=label)))
 
     def move_item(self, position: int, path: tuple, delta: int) -> EditGroup | None:
         """Sube (``delta`` < 0) o baja un elemento; ``None`` si ya está en el extremo."""
@@ -435,8 +445,8 @@ class Document:
         if not 0 <= target < len(items):
             return None
         label = self.full_label(position, path)
-        verb = "Subir" if delta < 0 else "Bajar"
-        return self._push(EditGroup((MoveItem(position, path[:-1], source, target),), f"{verb} {label}"))
+        description = Deferred("Subir {label}", label=label) if delta < 0 else Deferred("Bajar {label}", label=label)
+        return self._push(EditGroup((MoveItem(position, path[:-1], source, target),), description))
 
     def set_null(self, position: int, path: tuple) -> EditGroup:
         if self.objects[position].is_script:
@@ -446,7 +456,7 @@ class Document:
             raise EditError("Solo un objeto o una referencia (fuera de tuplas y de claves) puede pasar a nulo")
         node = bod.resolve(tree, path)
         operation = ReplaceValue(position, path, node, bod.Null())
-        return self._push(EditGroup((operation,), f"Poner a nulo {self.full_label(position, path)}"))
+        return self._push(EditGroup((operation,), Deferred("Poner a nulo {label}", label=self.full_label(position, path))))
 
     def copy_node(self, position: int, path: tuple) -> object:
         """Copia profunda de un nodo del árbol actual, lista para insertarla en otro sitio."""
@@ -483,7 +493,7 @@ class Document:
         if isinstance(value, bod.ExternalRef) and value.identity not in self._by_identity:
             raise EditError(f"No existe ningún objeto {identity_text(*value.identity)} en este archivo")
         operation = ReplaceValue(position, path, node, value)
-        return self._push(EditGroup((operation,), f"Rellenar {self.full_label(position, path)}"))
+        return self._push(EditGroup((operation,), Deferred("Rellenar {label}", label=self.full_label(position, path))))
 
     # --- Deshacer ----------------------------------------------------------------------------
 
@@ -505,11 +515,12 @@ class Document:
 
     @property
     def undo_description(self) -> str | None:
-        return self._undo[-1].description if self._undo else None
+        """Lo que desharía Ctrl+Z, en el idioma de la interfaz."""
+        return i18n.text(self._undo[-1].description) if self._undo else None
 
     @property
     def redo_description(self) -> str | None:
-        return self._redo[-1].description if self._redo else None
+        return i18n.text(self._redo[-1].description) if self._redo else None
 
     def run_operations(self, description: str, build: Callable[[Callable[[object], None]], None]) -> EditGroup | None:
         """Aplica operaciones una a una, cada una sobre el árbol que dejó la anterior.

@@ -30,7 +30,7 @@ def _crc_table() -> tuple[int, ...]:
     table = []
     for byte in range(256):
         crc = byte
-        for _ in range(8):
+        for _index in range(8):
             crc = (crc >> 1) ^ (CRC64_POLY_REFLECTED if crc & 1 else 0)
         table.append(crc)
     return tuple(table)

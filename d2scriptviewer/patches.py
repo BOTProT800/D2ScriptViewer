@@ -42,6 +42,7 @@ from .formats import bod
 from .formats.bod import Name
 from .formats.hashes import name_hash
 from .formats.obsp import STEAM_ORIGINAL_SHA256, identity_text
+from .i18n import Deferred
 
 PATCH_FORMAT = "d2svpatch"
 PATCH_VERSION = 1
@@ -536,7 +537,7 @@ def apply_patch(document: Document, patch: dict[str, object], name: str = "parch
             if sha256(document.blob(position)) != item.get("sha256_resultado"):
                 raise PatchError(f"{label}: el resultado no es el que espera el parche")
 
-    return document.run_operations(f"Aplicar {name}", build)
+    return document.run_operations(Deferred("Aplicar {name}", name=name), build)
 
 
 # --- Archivo ----------------------------------------------------------------------------------

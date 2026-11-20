@@ -29,6 +29,7 @@ from typing import Callable, Iterator, NamedTuple, Union
 
 from ..binary import F32, I32, TEXT_ENCODING, U16, U32
 from ..errors import FormatError, PathError
+from ..i18n import N_, variants
 from ..wording import count
 
 MAGIC = b"BOD\xfd"
@@ -148,7 +149,7 @@ class RawString(Value):
 
     __slots__ = ("text",)
     tag = TAG_RAW_STRING
-    type_label = "cadena"
+    type_label = N_("cadena", "tipo")
 
     def __init__(self, text: str) -> None:
         self.text = text
@@ -159,7 +160,7 @@ class HashedString(Value):
 
     __slots__ = ("name",)
     tag = TAG_NAME
-    type_label = "nombre"
+    type_label = N_("nombre", "tipo")
 
     def __init__(self, name: Name) -> None:
         self.name = name
@@ -170,7 +171,7 @@ class ExternalRef(Value):
 
     __slots__ = ("group", "object_id")
     tag = TAG_EXTERNAL_REF
-    type_label = "referencia"
+    type_label = N_("referencia", "tipo")
 
     def __init__(self, group: int, object_id: int) -> None:
         self.group = group
@@ -184,7 +185,7 @@ class ExternalRef(Value):
 class Null(Value):
     __slots__ = ()
     tag = TAG_NULL
-    type_label = "nulo"
+    type_label = N_("nulo", "tipo")
 
 
 class Note(Value):
@@ -218,7 +219,7 @@ class BodObject(Value):
 
     __slots__ = ("index", "cls", "fields")
     tag = TAG_OBJECT
-    type_label = "objeto"
+    type_label = N_("objeto", "tipo")
 
     def __init__(self, index: int | None, cls: ClassRef, fields: list[Field]) -> None:
         self.index = index
@@ -238,7 +239,7 @@ class BodList(Value):
 
     @property
     def type_label(self) -> str:  # type: ignore[override]
-        return "pares" if self.mode == MODE_PAIRS else "lista"
+        return N_("pares", "tipo") if self.mode == MODE_PAIRS else N_("lista", "tipo")
 
 
 class BodMap(Value):
@@ -246,7 +247,7 @@ class BodMap(Value):
 
     __slots__ = ("mode", "items")
     tag = TAG_MAP
-    type_label = "mapa"
+    type_label = N_("mapa", "tipo")
 
     def __init__(self, mode: int, items: list[Pair]) -> None:
         self.mode = mode
@@ -256,7 +257,7 @@ class BodMap(Value):
 class BodTuple(Value):
     __slots__ = ("items",)
     tag = TAG_TUPLE
-    type_label = "tupla"
+    type_label = N_("tupla", "tipo")
 
     def __init__(self, items: list[Value]) -> None:
         self.items = items
@@ -340,7 +341,7 @@ class _Decoder:
         value = self.value
         result = []
         append = result.append
-        for _ in range(count):
+        for _index in range(count):
             field_name = name()
             append(Field(field_name, value()))
         return result
@@ -349,7 +350,7 @@ class _Decoder:
         value = self.value
         result = []
         append = result.append
-        for _ in range(count):
+        for _index in range(count):
             key = value()
             append(Pair(key, value()))
         return result
@@ -383,7 +384,7 @@ class _Decoder:
                 items: list = self.pairs(count)
             elif mode == MODE_VALUES and tag == TAG_LIST:
                 value = self.value
-                items = [value() for _ in range(count)]
+                items = [value() for _index in range(count)]
             else:
                 raise FormatError(f"Modo {mode} desconocido en la secuencia 0x{tag:02X} de 0x{pos - 1:x}")
             return BodList(mode, items) if tag == TAG_LIST else BodMap(mode, items)
@@ -391,7 +392,7 @@ class _Decoder:
             count = U32.unpack_from(data, pos)[0]
             self.pos = pos + 4
             value = self.value
-            return BodTuple([value() for _ in range(count)])
+            return BodTuple([value() for _index in range(count)])
         if tag == TAG_EXTERNAL_REF:
             group, object_id = EXTERNAL_REF.unpack_from(data, pos)
             self.pos = pos + 12
@@ -658,7 +659,7 @@ def children(node: object) -> list[tuple[str, object]]:
     if isinstance(node, BodTuple):
         return [(f"[{index}]", item) for index, item in enumerate(node.items)]
     if isinstance(node, Pair):
-        return [("clave", node.key), ("valor", node.value)]
+        return [(PAIR_LABELS[0], node.key), (PAIR_LABELS[1], node.value)]
     return []
 
 
@@ -674,7 +675,7 @@ def child(node: object, step: int) -> tuple[str, object]:
         item = node.items[step]
         return f"[{step % len(node.items)}]", item
     if isinstance(node, Pair):
-        return (("clave", node.key), ("valor", node.value))[step]
+        return ((PAIR_LABELS[0], node.key), (PAIR_LABELS[1], node.value))[step]
     raise IndexError(step)
 
 
@@ -722,9 +723,9 @@ def path_label(document: BodDocument, path: Path) -> str:
 
 # --- Rutas legibles: la inversa de path_label (fase 11) ---------------------------------------
 
-ROOT_LABEL = "(raíz)"
+ROOT_LABEL = N_("(raíz)", "ruta")
 #: Las etiquetas de los dos hijos de un par, en su orden.
-PAIR_LABELS = ("clave", "valor")
+PAIR_LABELS = (N_("clave", "ruta"), N_("valor", "ruta"))
 #: Cuántos nombres parecidos se sugieren cuando un tramo no existe.
 SUGGESTIONS = 3
 #: Un índice con más cifras no cabe en ninguna lista (y ``int()`` limita las cifras que convierte).
@@ -735,7 +736,12 @@ _SPACES = re.compile(r"\s*")
 #: Un nombre llega hasta un separador de la ruta, uno de los que preceden a la propiedad (``·`` o
 #: ``::``) o un carácter de control. Ninguna etiqueta del juego contiene ``:`` ni ``·``.
 _NAME = re.compile(r"[^.\[\]·:\x00-\x1f\x7f-\x9f]*")
-_ROOT_TEXTS = ("", ROOT_LABEL, "(raiz)")
+
+
+@functools.lru_cache(maxsize=1)
+def _root_texts() -> frozenset[str]:
+    """Lo que vale como la raíz en una ruta: vacío y ``(raíz)`` en cualquier idioma, con o sin tilde."""
+    return frozenset({"", *(fold(text) for text in variants(ROOT_LABEL, "ruta"))})
 
 
 class PathStep(NamedTuple):
@@ -797,7 +803,7 @@ def parse_path_label(text: str, start: int = 0, end: int | None = None) -> list[
     """
     end = len(text) if end is None else end
     position = _skip_spaces(text, start, end)
-    if text[position:end].rstrip().casefold() in _ROOT_TEXTS:
+    if fold(text[position:end].rstrip()) in _root_texts():
         return []
     steps: list[PathStep] = []
     while position < end:
@@ -835,13 +841,40 @@ def parse_path_label(text: str, start: int = 0, end: int | None = None) -> list[
     return steps
 
 
-def _describe(document: BodDocument, path: Path) -> str:
-    return path_label(document, path) if path else "la raíz"
+class PathNames:
+    """Cómo nombra :func:`find_path` los tramos en sus mensajes y qué otros nombres acepta.
+
+    Por defecto, las etiquetas canónicas. La interfaz usa las de su idioma, que además
+    aceptan el vocabulario de los dos idiomas (:class:`.vocabulary.ShownNames`).
+    """
+
+    def describe(self, document: BodDocument, path: Path) -> str:
+        """El nodo de ``path`` en un mensaje."""
+        return path_label(document, path) if path else "la raíz"
+
+    def field(self, document: BodDocument, parent_path: Path, parent: object, label: str) -> str:
+        """Cómo se ve la etiqueta ``label`` de un hijo de ``parent``."""
+        return label
+
+    def type(self, node: object) -> str:
+        return type_text(node)
+
+    def alias(self, document: BodDocument, parent_path: Path, parent: object, name: str) -> str | None:
+        """La etiqueta canónica a la que lleva ``name`` si no es ninguna tal cual."""
+        return None
+
+
+CANONICAL_NAMES = PathNames()
 
 
 def _container_text(node: object) -> str:
-    kind = type_text(node)
-    return {"pares": "una lista de pares", "mapa": "un mapa", "tupla": "una tupla"}.get(kind, f"una {kind}")
+    if isinstance(node, BodMap):
+        return "un mapa"
+    if isinstance(node, BodTuple):
+        return "una tupla"
+    if isinstance(node, BodList) and node.mode == MODE_PAIRS:
+        return "una lista de pares"
+    return "una lista"
 
 
 def _quoted(names: list[str]) -> str:
@@ -857,19 +890,27 @@ def _close_matches(name: str, candidates: list[str]) -> list[str]:
     return [folded[key] for key in difflib.get_close_matches(fold(name), list(folded), n=SUGGESTIONS, cutoff=0.6)]
 
 
-def _find_field(fields: list[Field], name: str, where: Callable[[], str]) -> tuple[int | None, str]:
+def _find_field(
+    document: BodDocument, path: Path, node: BodObject, name: str, where: Callable[[], str], names: PathNames,
+) -> tuple[int | None, str]:
     """(índice del campo o ``None``, mensaje).
 
-    Sin campo, el mensaje explica por qué. Con campo, avisa si su nombre se repite.
+    Primero el nombre exacto; después, el término de otro idioma (``names.alias``); por
+    último, sin distinguir mayúsculas ni tildes. Sin campo, el mensaje explica por qué. Con
+    campo, avisa si su nombre se repite. Los mensajes nombran los campos como se ven.
     """
+    fields = node.fields
     found = [index for index, field in enumerate(fields) if field.name.text == name]
+    if not found and (canonical := names.alias(document, path, node, name)) is not None:
+        found = [index for index, field in enumerate(fields) if field.name.text == canonical]
     labels = [field.name.text for field in fields] if not found or len(found) > 1 else []
+    shown = [names.field(document, path, node, label) for label in labels]
     if not found:
         target = fold(name)
         found = [index for index, label in enumerate(labels) if fold(label) == target]
-        variants = sorted({labels[index] for index in found})
-        if len(variants) > 1:
-            return None, f"«{name}» puede ser {_quoted(variants)} en {where()}: escríbelo con sus mayúsculas"
+        spellings = sorted({shown[index] for index in found})
+        if len(spellings) > 1:
+            return None, f"«{name}» puede ser {_quoted(spellings)} en {where()}: escríbelo con sus mayúsculas"
     if not found and (offset := _OFFSET.fullmatch(name)) is not None:
         value = int(offset.group(1), 16)
         starts = [
@@ -883,33 +924,35 @@ def _find_field(fields: list[Field], name: str, where: Callable[[], str]) -> tup
             previous = f": la anterior es {before[-1]}" if before else ""
             return None, f"«{name}» no es el comienzo de ninguna instrucción de {where()}{previous}"
     if not found:
-        similar = _close_matches(name, labels)
+        similar = _close_matches(name, shown)
         hint = f". Parecidos: {', '.join(f'«{label}»' for label in similar)}" if similar else ""
         return None, f"«{name}» no es un campo de {where()}{hint}"
     if len(found) > 1:
-        return found[0], f"Hay {len(found)} campos «{labels[found[0]]}» en {where()}: se eligió el primero"
+        return found[0], f"Hay {len(found)} campos «{shown[found[0]]}» en {where()}: se eligió el primero"
     return found[0], ""
 
 
-def find_path(document: BodDocument, steps: list[PathStep]) -> PathMatch:
+def find_path(document: BodDocument, steps: list[PathStep], names: PathNames = CANONICAL_NAMES) -> PathMatch:
     """Sigue ``steps`` (de :func:`parse_path_label`) desde la raíz de ``document``.
 
-    Cada nombre se busca primero exacto y, si no hay ninguno, sin distinguir mayúsculas ni
-    tildes, solo si todas las coincidencias son el mismo nombre. Un ``0x…`` sin coincidencia de
-    texto se compara por valor (``0x4e`` es ``0x004E``). Un par tiene ``clave`` y ``valor``.
+    Cada nombre se busca primero exacto, después como término de otro idioma (``names``) y,
+    si no hay ninguno, sin distinguir mayúsculas ni tildes, solo si todas las coincidencias
+    son el mismo nombre. Un ``0x…`` sin coincidencia de texto se compara por valor (``0x4e``
+    es ``0x004E``). Un par tiene ``clave`` y ``valor``. Los mensajes nombran los tramos con
+    ``names``.
     """
     node: object = document.root
     path: Path = ()
     notes: list[str] = []
     for step in steps:
-        where = functools.partial(_describe, document, path)
+        where = functools.partial(names.describe, document, path)
         index: int | None = None
         message = ""
         if isinstance(node, BodObject):
             if step.name is None:
                 message = f"«{step.text}» no vale aquí: {where()} es un objeto y sus campos van por nombre"
             else:
-                index, message = _find_field(node.fields, step.name, where)
+                index, message = _find_field(document, path, node, step.name, where, names)
         elif isinstance(node, (BodList, BodMap, BodTuple)):
             size = len(node.items)
             if step.index is None:
@@ -922,12 +965,16 @@ def find_path(document: BodDocument, steps: list[PathStep]) -> PathMatch:
                 message = f"«{step.text}» no existe: {where()} no tiene elementos"
         elif isinstance(node, Pair):
             folded = fold(step.name) if step.name is not None else ""
+            canonical = names.alias(document, path, node, step.name) if step.name is not None else None
             if folded in PAIR_LABELS:
                 index = PAIR_LABELS.index(folded)
+            elif canonical in PAIR_LABELS:
+                index = PAIR_LABELS.index(canonical)
             else:
-                message = f"«{step.text}» no vale aquí: {where()} es un par y solo tiene .clave y .valor"
+                key, value = (names.field(document, path, node, label) for label in PAIR_LABELS)
+                message = f"«{step.text}» no vale aquí: {where()} es un par y solo tiene .{key} y .{value}"
         else:
-            message = f"«{step.text}» no vale aquí: {where()} es un valor ({type_text(node)}) y no tiene hijos"
+            message = f"«{step.text}» no vale aquí: {where()} es un valor ({names.type(node)}) y no tiene hijos"
         if index is None:
             return PathMatch(path, step, message)
         if message:
@@ -987,7 +1034,7 @@ def value_text(value: object) -> str:
 
 def type_text(value: object) -> str:
     if isinstance(value, Pair):
-        return "par"
+        return N_("par", "tipo")
     if isinstance(value, Value):
         return value.type_label
     return ""

@@ -1216,5 +1216,201 @@ class RealViewerTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(REAL_OBSP.read_bytes()).hexdigest(), before_sha)
 
 
+def menu_labels(app: tk.Tk, menu: tk.Menu | None = None) -> list[str]:
+    """Las etiquetas de un menú y de sus submenús, en orden."""
+    menu = menu or app.menubar  # type: ignore[attr-defined]
+    labels: list[str] = []
+    last = menu.index("end")
+    for index in range(last + 1 if last is not None else 0):
+        kind = menu.type(index)
+        if kind in ("separator", "tearoff"):
+            continue
+        labels.append(menu.entrycget(index, "label"))
+        if kind == "cascade":
+            labels.extend(menu_labels(app, app.nametowidget(menu.entrycget(index, "menu"))))
+    return labels
+
+
+@requires_tk
+class LanguageGuiTests(TempDirMixin, unittest.TestCase):
+    """El menú «Idioma / Language», el cambio en caliente y la elección guardada (fase 12)."""
+
+    def make_app(self, **options: object):
+        from d2scriptviewer.gui.app import ViewerApp
+
+        options.setdefault("persist_settings", False)
+        app = ViewerApp(auto_open=False, **options)  # type: ignore[arg-type]
+        app.withdraw()
+        app.update()
+        app.ask = lambda _title, _message, **_options: True
+        app.inform = lambda _title, _message: None
+        return app
+
+    def open_fixture(self, app) -> Document:
+        document = Document.from_bytes(fixtures.make_obsp())
+        app.set_document(document)
+        self.assertTrue(pump(app, lambda: app.indexes is not None))
+        return document
+
+    def test_menu(self) -> None:
+        from d2scriptviewer import i18n
+
+        app = self.make_app()
+        self.addCleanup(app.destroy)
+        top = [app.menubar.entrycget(index, "label") for index in range(app.menubar.index("end") + 1)
+               if app.menubar.type(index) == "cascade"]
+        self.assertEqual(top[-2:], [i18n.MENU_LABEL, "Ayuda"])
+        menu = app.nametowidget(app.menubar.entrycget(i18n.MENU_LABEL, "menu"))
+        self.assertEqual([(menu.type(index), menu.entrycget(index, "label")) for index in range(menu.index("end") + 1)],
+                         [("radiobutton", "English"), ("radiobutton", "Español")])
+        self.assertEqual(app.language_var.get(), "es")
+        menu.invoke(0)  # English
+        self.assertEqual(i18n.language(), "en")
+        self.assertIn("File", menu_labels(app))
+        self.assertIn(i18n.MENU_LABEL, menu_labels(app))
+
+    def test_switch_keeps_document_edits_and_selection(self) -> None:
+        from d2scriptviewer import i18n
+
+        app = self.make_app()
+        self.addCleanup(app.destroy)
+        document = self.open_fixture(app)
+        desc = document.find("death/death_desc")[0].position
+        script_position = document.find("scripts/test")[0].position
+        app.navigate(script_position)
+        app.navigate(desc)
+        view = app.property_view
+        tree = document.bod(desc)
+        health = next(path for path, node in bod.walk(tree.root) if path and bod.path_label(tree, path) == "Health")
+        self.assertIsNone(app.commit_text_edit(bod.resolve(tree, health), health, "250"))
+        view.reveal(health)
+        view.set_search_query("Health", "", "")
+        app.object_tree.set_group_mode("Ruta")
+        app.object_tree.refresh()
+        app.update()
+
+        self.assertTrue(app.change_language("en"))
+        app.update()
+        self.assertIs(app.document, document)
+        self.assertEqual((app.position, document.change_count), (desc, 1))
+        self.assertEqual(app.property_view.selected()[1], health)
+        self.assertTrue(app.edit_menu.entrycget(0, "label").startswith("Undo: Edit death/death_desc · Health"))
+        self.assertIn("File", menu_labels(app))
+        self.assertNotIn("Archivo", menu_labels(app))
+        self.assertIn("Darksiders II Deathinitive Edition scripts.obsp", app.title())
+        self.assertEqual(app.history_back, [script_position])
+        self.assertEqual(str(app.back_button.cget("state")), "normal")
+        self.assertEqual(app.property_view.search_query(), ("Health", "", ""))
+        self.assertEqual(app.object_tree.group_mode, "Ruta")
+        self.assertEqual(app.object_tree.group_var.get(), "Path")
+        self.assertEqual(app.status_var.get(), "Interface language: English")
+
+        app.undo()
+        self.assertEqual(app.status_var.get(), "Undone: Edit death/death_desc · Health")
+        app.redo()
+        self.assertTrue(app.change_language("es"))
+        app.update()
+        self.assertTrue(app.edit_menu.entrycget(0, "label").startswith("Deshacer: Editar death/death_desc · Health"))
+        self.assertEqual(app.object_tree.group_var.get(), "Ruta")
+        self.assertEqual(i18n.language(), "es")
+
+    def test_script_rows_paths_and_goto_in_english(self) -> None:
+        app = self.make_app(language="en")
+        self.addCleanup(app.destroy)
+        document = self.open_fixture(app)
+        position = document.find("scripts/test")[0].position
+        app.navigate(position)
+        view = app.property_view
+        names = [view.tree.item(iid, "text") for iid in view.tree.get_children("")]
+        self.assertIn("Functions", names)
+        self.assertIn("Initial values", names)
+        self.assertNotIn("Funciones", names)
+        tree = document.bod(position)
+        functions = next(index for index, field in enumerate(tree.root.fields) if field.name.text == "Funciones")
+        parameters = (functions, 0, 0)
+        self.assertEqual(app.full_label(parameters), "scripts/test · Functions.OnStart.Parameters")
+        self.assertEqual(i18n_text(document.full_label(position, parameters)),
+                         "scripts/test · Functions.OnStart.Parameters")
+        self.assertEqual(str(document.full_label(position, parameters)), "scripts/test · Funciones.OnStart.Parámetros")
+        for text in ("Functions.OnStart.Parameters", "Funciones.OnStart.Parámetros",
+                     "scripts/test · functions.onstart.parametros"):
+            with self.subTest(ruta=text):
+                view.reveal(())
+                app.go_to_location(text)
+                self.assertEqual(view.selected()[1], parameters)
+        view.set_search_query("", "function", "")
+        view.run_search()
+        self.assertTrue(view.search_results)
+        self.assertEqual(view.search_type.cget("values")[0], "(any)")
+
+    def test_old_panels_are_released(self) -> None:
+        """Las trazas de las variables retenían los paneles sustituidos desde Tcl."""
+        import gc
+        import weakref
+
+        app = self.make_app()
+        self.addCleanup(app.destroy)
+        self.open_fixture(app)
+        app.navigate(app.document.find("death/death_desc")[0].position)
+        old = [weakref.ref(panel) for panel in (app.object_tree, app.property_view, app.details)]
+        enabled = gc.isenabled()
+        gc.disable()  # que solo cuente la recogida del propio cambio de idioma
+        try:
+            self.assertTrue(app.change_language("en"))
+        finally:
+            if enabled:
+                gc.enable()
+        self.assertEqual([ref() is None for ref in old], [True, True, True])
+
+    def test_refused_while_saving(self) -> None:
+        from d2scriptviewer import i18n
+
+        app = self.make_app()
+        self.addCleanup(app.destroy)
+        app.saving = True
+        self.assertFalse(app.change_language("en"))
+        self.assertEqual((i18n.language(), app.language_var.get()), ("es", "es"))
+        self.assertIn("idioma", app.status_var.get())
+        self.assertIn("Archivo", menu_labels(app))
+
+    def test_choice_is_saved_and_used_next_time(self) -> None:
+        import json
+        import os
+
+        from d2scriptviewer import i18n, settings
+
+        folder = self.make_temp_dir()
+        with mock.patch.dict(os.environ, {"APPDATA": str(folder), i18n.LANGUAGE_ENV: ""}), \
+                mock.patch.object(i18n, "system_language", return_value="es"):
+            app = self.make_app(persist_settings=True)
+            try:
+                self.assertEqual(i18n.language(), "es")
+                self.assertFalse(settings.config_path().exists())  # el primer arranque no guarda nada
+                self.assertTrue(app.change_language("en"))
+                self.assertEqual(json.loads(settings.config_path().read_text(encoding="utf-8"))["language"], "en")
+            finally:
+                app.destroy()
+            app = self.make_app(persist_settings=True)
+            try:
+                self.assertEqual((i18n.language(), app.language_var.get()), ("en", "en"))
+                self.assertIn("File", menu_labels(app))
+            finally:
+                app.destroy()
+            with mock.patch.dict(os.environ, {i18n.LANGUAGE_ENV: "es"}):
+                app = self.make_app(persist_settings=True)
+                try:
+                    self.assertEqual(i18n.language(), "es")  # D2SV_LANG manda y no se guarda
+                finally:
+                    app.destroy()
+            self.assertEqual(json.loads(settings.config_path().read_text(encoding="utf-8"))["language"], "en")
+        self.assertEqual(i18n.language(), "es")  # cerrar la ventana devuelve el idioma de la CLI
+
+
+def i18n_text(value: object) -> str:
+    from d2scriptviewer import i18n
+
+    return i18n.text(value)
+
+
 if __name__ == "__main__":
     unittest.main()

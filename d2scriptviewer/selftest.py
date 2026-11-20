@@ -20,9 +20,10 @@ from . import __version__
 #: Todos los módulos del paquete: si falta uno en el ejecutable, se ve aquí.
 MODULES = (
     "d2scriptviewer.binary", "d2scriptviewer.cli", "d2scriptviewer.diffing", "d2scriptviewer.document",
-    "d2scriptviewer.edits", "d2scriptviewer.errors", "d2scriptviewer.export", "d2scriptviewer.patches",
-    "d2scriptviewer.references", "d2scriptviewer.saving", "d2scriptviewer.search", "d2scriptviewer.settings",
-    "d2scriptviewer.validation", "d2scriptviewer.verification", "d2scriptviewer.wording",
+    "d2scriptviewer.edits", "d2scriptviewer.errors", "d2scriptviewer.export", "d2scriptviewer.i18n",
+    "d2scriptviewer.i18n_en", "d2scriptviewer.patches", "d2scriptviewer.references", "d2scriptviewer.saving",
+    "d2scriptviewer.search", "d2scriptviewer.settings", "d2scriptviewer.validation", "d2scriptviewer.verification",
+    "d2scriptviewer.vocabulary", "d2scriptviewer.wording",
     "d2scriptviewer.formats.bod", "d2scriptviewer.formats.bytecode", "d2scriptviewer.formats.hashes",
     "d2scriptviewer.formats.obsp", "d2scriptviewer.formats.script",
     "d2scriptviewer.gui.app", "d2scriptviewer.gui.details", "d2scriptviewer.gui.editors",

@@ -14,6 +14,7 @@ identificador y refresca las vistas con :meth:`ViewerApp._after_change`.
 
 from __future__ import annotations
 
+import gc
 import queue
 import threading
 import time
@@ -22,12 +23,13 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
-from .. import __version__, edits, export, patches, saving
+from .. import __version__, edits, export, i18n, patches, saving, vocabulary
 from ..document import Document, Location
 from ..edits import EditGroup
 from ..errors import D2ScriptViewerError, EditError, PathError
 from ..formats import bod, script
 from ..formats.obsp import identity_text
+from ..i18n import _, ngettext
 from ..references import Cancelled, FileIndexes, build_indexes, references_in, slot_key
 from ..settings import DEFAULT_GAME, find_default_obsp, load_settings, save_settings
 from ..wording import count as count_text
@@ -45,10 +47,24 @@ SYNC_DECODE_LIMIT = 48 * 1024
 
 
 class ViewerApp(tk.Tk):
-    def __init__(self, initial: Path | None = None, *, auto_open: bool = True, persist_settings: bool = True) -> None:
+    def __init__(
+        self,
+        initial: Path | None = None,
+        *,
+        auto_open: bool = True,
+        persist_settings: bool = True,
+        language: str | None = None,
+    ) -> None:
+        """``language`` fija el idioma de la interfaz. Sin él, el de ``D2SV_LANG``, el guardado o el
+        de Windows; sin preferencias (los tests), el español.
+        """
         super().__init__()
         self.persist_settings = persist_settings
         self.settings = load_settings() if persist_settings else {}
+        if language is None:
+            language = i18n.initial_language(self.settings.get("language")) if persist_settings else i18n.SPANISH
+        i18n.set_language(language)
+        self.language_var = tk.StringVar(value=language)
         self.document: Document | None = None
         self._update_title()
         geometry = self.settings.get("geometry")
@@ -90,9 +106,9 @@ class ViewerApp(tk.Tk):
         self.last_display_seconds = 0.0
         self._display_started = 0.0
 
-        self.summary_var = tk.StringVar(value="Sin archivo")
+        self.summary_var = tk.StringVar(value=_("Sin archivo"))
         self.state_var = tk.StringVar(value="")
-        self.status_var = tk.StringVar(value="Abre un scripts.obsp con Archivo → Abrir (Ctrl+O)")
+        self.status_var = tk.StringVar(value=_("Abre un scripts.obsp con Archivo → Abrir (Ctrl+O)"))
         self.path_var = tk.StringVar(value="")
         self.changes_var = tk.StringVar(value="")
         self.rotating_var = tk.BooleanVar(value=bool(self.settings.get("rotating_backups", True)))
@@ -112,61 +128,71 @@ class ViewerApp(tk.Tk):
     def _build_menu(self) -> None:
         menubar = tk.Menu(self)
         self.file_menu = tk.Menu(menubar, tearoff=False)
-        self.file_menu.add_command(label="Abrir…", accelerator="Ctrl+O", command=self.choose_file)
-        self.file_menu.add_command(label="Guardar", accelerator="Ctrl+S", command=self.save)
-        self.file_menu.add_command(label="Guardar como…", accelerator="Ctrl+Mayús+S", command=self.save_as)
+        self.file_menu.add_command(label=_("Abrir…"), accelerator="Ctrl+O", command=self.choose_file)
+        self.file_menu.add_command(label=_("Guardar"), accelerator="Ctrl+S", command=self.save)
+        self.file_menu.add_command(label=_("Guardar como…"), accelerator=_("Ctrl+Mayús+S"), command=self.save_as)
         self.file_menu.add_separator()
-        self.file_menu.add_command(label="Restaurar original…", command=self.restore_original_file)
+        self.file_menu.add_command(label=_("Restaurar original…"), command=self.restore_original_file)
         self.file_menu.add_separator()
-        self.file_menu.add_command(label="Exportar a JSON y CSV…", command=self.export_files)
-        self.file_menu.add_command(label="Exportar parche…", command=self.export_patch)
-        self.file_menu.add_command(label="Aplicar parche…", command=self.apply_patch_file)
+        self.file_menu.add_command(label=_("Exportar a JSON y CSV…"), command=self.export_files)
+        self.file_menu.add_command(label=_("Exportar parche…"), command=self.export_patch)
+        self.file_menu.add_command(label=_("Aplicar parche…"), command=self.apply_patch_file)
         self.file_menu.add_checkbutton(
-            label=f"Copia rotativa de la versión anterior (últimas {saving.KEEP_BACKUPS})",
+            label=_("Copia rotativa de la versión anterior (últimas {count})").format(count=saving.KEEP_BACKUPS),
             variable=self.rotating_var,
         )
         self.file_menu.add_separator()
-        self.file_menu.add_command(label="Salir", command=self._on_close)
-        menubar.add_cascade(label="Archivo", menu=self.file_menu)
+        self.file_menu.add_command(label=_("Salir"), command=self._on_close)
+        menubar.add_cascade(label=_("Archivo"), menu=self.file_menu)
 
         self.edit_menu = tk.Menu(menubar, tearoff=False)
-        self.edit_menu.add_command(label="Deshacer", accelerator="Ctrl+Z", command=self.undo, state="disabled")
-        self.edit_menu.add_command(label="Rehacer", accelerator="Ctrl+Y", command=self.redo, state="disabled")
+        self.edit_menu.add_command(label=_("Deshacer"), accelerator="Ctrl+Z", command=self.undo, state="disabled")
+        self.edit_menu.add_command(label=_("Rehacer"), accelerator="Ctrl+Y", command=self.redo, state="disabled")
         self.edit_menu.add_separator()
-        self.edit_menu.add_command(label="Editar valor", accelerator="F2", command=self.property_view_edit)
-        self.edit_menu.add_command(label="Revertir objeto", command=self.revert_current_object)
+        self.edit_menu.add_command(label=_("Editar valor"), accelerator="F2", command=self.property_view_edit)
+        self.edit_menu.add_command(label=_("Revertir objeto"), command=self.revert_current_object)
         structure_menu = tk.Menu(self.edit_menu, tearoff=False)
         for label, accelerator, action in (
-            ("Duplicar elemento", "Ctrl+D", "duplicate"),
-            ("Eliminar elemento", "Supr", "remove"),
-            ("Subir", "Alt+↑", "up"),
-            ("Bajar", "Alt+↓", "down"),
-            ("Poner a nulo", "", "null"),
-            ("Rellenar nulo con un objeto…", "", "fill"),
+            (_("Duplicar elemento"), "Ctrl+D", "duplicate"),
+            (_("Eliminar elemento"), _("Supr"), "remove"),
+            (_("Subir"), "Alt+↑", "up"),
+            (_("Bajar"), "Alt+↓", "down"),
+            (_("Poner a nulo"), "", "null"),
+            (_("Rellenar nulo con un objeto…"), "", "fill"),
         ):
             structure_menu.add_command(
                 label=label, accelerator=accelerator, command=lambda action=action: self._structure_from_menu(action)
             )
-        self.edit_menu.add_cascade(label="Estructura", menu=structure_menu)
+        self.edit_menu.add_cascade(label=_("Estructura"), menu=structure_menu)
         self.edit_menu.add_separator()
-        self.edit_menu.add_command(label="Cambios pendientes…", accelerator="Ctrl+P", command=self.open_pending)
-        menubar.add_cascade(label="Editar", menu=self.edit_menu)
+        self.edit_menu.add_command(label=_("Cambios pendientes…"), accelerator="Ctrl+P", command=self.open_pending)
+        menubar.add_cascade(label=_("Editar"), menu=self.edit_menu)
 
         search_menu = tk.Menu(menubar, tearoff=False)
-        search_menu.add_command(label="Buscar en el objeto", accelerator="Ctrl+F", command=self.focus_object_search)
-        search_menu.add_command(label="Buscar en todo el archivo…", accelerator="Ctrl+Mayús+F", command=self.open_search)
-        menubar.add_cascade(label="Buscar", menu=search_menu)
+        search_menu.add_command(label=_("Buscar en el objeto"), accelerator="Ctrl+F", command=self.focus_object_search)
+        search_menu.add_command(label=_("Buscar en todo el archivo…"), accelerator=_("Ctrl+Mayús+F"),
+                                command=self.open_search)
+        menubar.add_cascade(label=_("Buscar"), menu=search_menu)
 
         go_menu = tk.Menu(menubar, tearoff=False)
-        go_menu.add_command(label="Atrás", accelerator="Alt+Izquierda", command=self.go_back)
-        go_menu.add_command(label="Adelante", accelerator="Alt+Derecha", command=self.go_forward)
+        go_menu.add_command(label=_("Atrás"), accelerator=_("Alt+Izquierda"), command=self.go_back)
+        go_menu.add_command(label=_("Adelante"), accelerator=_("Alt+Derecha"), command=self.go_forward)
         go_menu.add_separator()
-        go_menu.add_command(label="Ir a la ruta…", accelerator="Ctrl+G", command=self.open_goto)
-        menubar.add_cascade(label="Ir", menu=go_menu)
+        go_menu.add_command(label=_("Ir a la ruta…"), accelerator="Ctrl+G", command=self.open_goto)
+        menubar.add_cascade(label=_("Ir"), menu=go_menu)
+
+        # El menú de idioma se entiende en los dos idiomas, y cada uno se nombra en el suyo.
+        self.language_menu = tk.Menu(menubar, tearoff=False)
+        for code, name in i18n.LANGUAGES.items():
+            self.language_menu.add_radiobutton(
+                label=name, value=code, variable=self.language_var,
+                command=lambda: self.change_language(self.language_var.get()),
+            )
+        menubar.add_cascade(label=i18n.MENU_LABEL, menu=self.language_menu)
 
         help_menu = tk.Menu(menubar, tearoff=False)
-        help_menu.add_command(label="Acerca de", command=self._about)
-        menubar.add_cascade(label="Ayuda", menu=help_menu)
+        help_menu.add_command(label=_("Acerca de"), command=self._about)
+        menubar.add_cascade(label=_("Ayuda"), menu=help_menu)
         self.configure(menu=menubar)
         self.menubar = menubar
 
@@ -205,7 +231,7 @@ class ViewerApp(tk.Tk):
         ttk.Label(header, text="D2SCRIPTVIEWER", style="Title.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="Visor y editor de scripts.obsp — Darksiders II Deathinitive Edition",
+            text=_("Visor y editor de scripts.obsp — Darksiders II Deathinitive Edition"),
             style="Muted.TLabel",
         ).grid(row=1, column=0, sticky="w")
         ttk.Label(header, textvariable=self.summary_var, style="Muted.TLabel").grid(row=0, column=1, rowspan=2, sticky="e")
@@ -216,7 +242,7 @@ class ViewerApp(tk.Tk):
         self.object_tree = ObjectTree(pane, on_select=lambda position: self.navigate(position))
         group_by = self.settings.get("group_by")
         if group_by in GROUP_MODES:
-            self.object_tree.group_var.set(str(group_by))
+            self.object_tree.set_group_mode(str(group_by))
         self.property_view = PropertyView(
             pane,
             ref_label=self.ref_label,
@@ -237,7 +263,7 @@ class ViewerApp(tk.Tk):
         pane.add(self.details, weight=3)
         self.pane = pane
         # Los pesos solo reparten el espacio sobrante: el reparto inicial se fija a mano.
-        self.after_idle(self._place_sashes)
+        self._sash_after: str | None = self.after_idle(self._place_sashes)
 
         self.back_button = ttk.Button(self.property_view.toolbar, text="←", width=3, command=self.go_back, state="disabled")
         self.back_button.pack(side="left")
@@ -259,6 +285,7 @@ class ViewerApp(tk.Tk):
         self.status_frame = status
 
     def _place_sashes(self) -> None:
+        self._sash_after = None
         self.update_idletasks()
         width = self.pane.winfo_width()
         if width > 300:
@@ -301,8 +328,8 @@ class ViewerApp(tk.Tk):
             return Path(value)
         return None
 
-    def _resolve_unsaved(self, action: str, then: Callable[[], None]) -> bool:
-        """Pregunta qué hacer con los cambios sin guardar antes de ``action``.
+    def _resolve_unsaved(self, question: str, then: Callable[[], None]) -> bool:
+        """Pregunta qué hacer con los cambios sin guardar; ``question`` dice antes de qué.
 
         Devuelve ``True`` si se puede seguir ya (no hay cambios o se descartan). Si el
         usuario elige guardar, el guardado corre en segundo plano y ``then`` se llama
@@ -310,14 +337,15 @@ class ViewerApp(tk.Tk):
         """
         document = self.document
         if self.saving:
-            self.status_var.set("Espera a que termine el guardado")
+            self.status_var.set(_("Espera a que termine el guardado"))
             return False
         if document is None or not document.change_count:
             return True
+        changes = document.change_count
         answer = self.ask_save(
             APP_NAME,
-            f"Hay {count_text(document.change_count, 'cambio')} sin guardar.\n\n"
-            f"¿Guardarlos antes de {action}?\n(«No» los descarta.)",
+            ngettext("Hay {count:,} cambio sin guardar.", "Hay {count:,} cambios sin guardar.", changes).format(
+                count=changes) + "\n\n" + question + "\n" + _("(«No» los descarta.)"),
             icon="warning",
         )
         if answer is None:
@@ -332,7 +360,7 @@ class ViewerApp(tk.Tk):
         return False
 
     def choose_file(self) -> None:
-        if not self._resolve_unsaved("abrir otro archivo", then=self.choose_file):
+        if not self._resolve_unsaved(_("¿Guardarlos antes de abrir otro archivo?"), then=self.choose_file):
             return
         current = self.document.path if self.document and self.document.path else None
         selected = filedialog.askopenfilename(
@@ -363,7 +391,8 @@ class ViewerApp(tk.Tk):
         if isinstance(payload, BaseException):
             self.status_var.set("No se pudo abrir el archivo")
             message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
-            messagebox.showerror(APP_NAME, f"No se pudo abrir el archivo.\n\n{message}", parent=self)
+            messagebox.showerror(APP_NAME, _("No se pudo abrir el archivo.\n\n{message}").format(message=message),
+                                 parent=self)
             return
         document, removed_tmp = payload  # type: ignore[misc]
         self.set_document(document)
@@ -378,31 +407,44 @@ class ViewerApp(tk.Tk):
         self.history_back.clear()
         self.history_forward.clear()
         self._update_history_buttons()
+        self._close_secondary_windows()
+        self._decoding = None
+        self._pending_location = None
+        if self.property_view.goto_visible:
+            self.property_view.hide_goto()
+        self._show_document()
+        if document.path is not None:
+            self.settings["last_file"] = str(document.path)
+        self.status_var.set(_("Indexando referencias y cadenas en segundo plano…"))
+        self._start_indexing()
+
+    def _close_secondary_windows(self) -> None:
         if self.search_window is not None and self.search_window.winfo_exists():
             self.search_window.close()
         self.search_window = None
         if self.pending_window is not None and self.pending_window.winfo_exists():
             self.pending_window.destroy()
         self.pending_window = None
+
+    def _show_document(self) -> None:
+        """Pinta el documento abierto en los paneles, sin objeto seleccionado (abrir y cambiar de idioma)."""
+        document = self.document
+        assert document is not None
         self.object_tree.set_document(document)
-        self._decoding = None
-        self._pending_location = None
-        if self.property_view.goto_visible:
-            self.property_view.hide_goto()
-        self.property_view.show_message("", "Selecciona un objeto en el panel de la izquierda.")
+        self.object_tree.set_modified(document.modified_positions)
+        self.property_view.show_message("", _("Selecciona un objeto en el panel de la izquierda."))
         self.details.clear()
-        self.details.set_indexes(None)
+        self.details.set_indexes(self.indexes)
         self._update_file_state()
         size = len(document.obsp.data)
+        count = len(document.objects)
         self.summary_var.set(
-            f"{len(document.objects):,} objetos  •  {theme.human_size(size)}  •  SHA-256 {document.obsp.sha256()[:16]}…"
+            ngettext("{count:,} objeto  •  {size}  •  SHA-256 {sha}…", "{count:,} objetos  •  {size}  •  SHA-256 {sha}…",
+                     count).format(count=count, size=theme.human_size(size), sha=document.obsp.sha256()[:16])
         )
         if document.path is not None:
             self.path_var.set(str(document.path))
-            self.settings["last_file"] = str(document.path)
-        self.status_var.set("Indexando referencias y cadenas en segundo plano…")
         self._update_change_state()
-        self._start_indexing()
 
     def _update_file_state(self) -> None:
         if self.document is None:
@@ -642,7 +684,7 @@ class ViewerApp(tk.Tk):
         document, position = self.document, self.position
         if document is None or position is None or not isinstance(node, bod.ExternalRef) or self.saving:
             return
-        title = document.full_label(position, path)
+        title = i18n.text(document.full_label(position, path))
         identity = ReferencePicker(self, document, node.identity, title).choose()
         if identity is None:
             return
@@ -730,7 +772,7 @@ class ViewerApp(tk.Tk):
         key = slot_key(tree, path)
         classes = self.indexes.slots.classes(key)
         references = self.indexes.slots.references(key)
-        title = document.full_label(position, path)
+        title = i18n.text(document.full_label(position, path))
         if not classes and not references:
             self.inform(APP_NAME, f"En el archivo no aparece ningún objeto ni referencia en el hueco "
                                   f"{key[0]}.{key[1]}, así que no hay de dónde copiar uno con seguridad.")
@@ -764,7 +806,7 @@ class ViewerApp(tk.Tk):
         self.property_view.cancel_edit()
         group = self.document.undo()
         if group is not None:
-            self._after_change(group, reveal=True, prefix="Deshecho", forward=False)
+            self._after_change(group, reveal=True, prefix=_("Deshecho: {description}"), forward=False)
 
     def redo(self) -> None:
         if self.document is None or self.saving:
@@ -772,7 +814,7 @@ class ViewerApp(tk.Tk):
         self.property_view.cancel_edit()
         group = self.document.redo()
         if group is not None:
-            self._after_change(group, reveal=True, prefix="Rehecho")
+            self._after_change(group, reveal=True, prefix=_("Rehecho: {description}"))
 
     def _after_change(self, group: EditGroup, *, reveal: bool, prefix: str = "", forward: bool = True) -> None:
         """Pone al día todas las vistas tras editar, deshacer, rehacer o revertir.
@@ -803,7 +845,8 @@ class ViewerApp(tk.Tk):
         if self.pending_window is not None and self.pending_window.winfo_exists():
             self.pending_window.refresh()
         self._update_change_state()
-        self.status_var.set(f"{prefix}: {group.description}" if prefix else group.description)
+        description = i18n.text(group.description)
+        self.status_var.set(prefix.format(description=description) if prefix else description)
 
     def _update_change_state(self) -> None:
         document = self.document
@@ -818,10 +861,12 @@ class ViewerApp(tk.Tk):
         undo = document.undo_description if document else None
         redo = document.redo_description if document else None
         self.edit_menu.entryconfigure(
-            0, label=f"Deshacer: {self._short(undo)}" if undo else "Deshacer", state="normal" if undo else "disabled"
+            0, label=_("Deshacer: {action}").format(action=self._short(undo)) if undo else _("Deshacer"),
+            state="normal" if undo else "disabled",
         )
         self.edit_menu.entryconfigure(
-            1, label=f"Rehacer: {self._short(redo)}" if redo else "Rehacer", state="normal" if redo else "disabled"
+            1, label=_("Rehacer: {action}").format(action=self._short(redo)) if redo else _("Rehacer"),
+            state="normal" if redo else "disabled",
         )
         self._update_title()
 
@@ -834,7 +879,8 @@ class ViewerApp(tk.Tk):
         document = self.document
         dirty = "* " if document is not None and document.change_count else ""
         name = f"{document.path.name} — " if document is not None and document.path is not None else ""
-        self.title(f"{dirty}{name}{APP_NAME} {__version__} — scripts.obsp de Darksiders II Deathinitive Edition")
+        self.title(_("{dirty}{name}{app} {version} — scripts.obsp de Darksiders II Deathinitive Edition").format(
+            dirty=dirty, name=name, app=APP_NAME, version=__version__))
 
     def open_pending(self) -> None:
         if self.document is None:
@@ -892,8 +938,8 @@ class ViewerApp(tk.Tk):
             return
         target = Path(selected)
         if saving.is_original_copy(target):
-            messagebox.showerror(APP_NAME, "Los archivos *.original.obsp son copias del original y nunca se "
-                                           "sobrescriben. Elige otro nombre.", parent=self)
+            messagebox.showerror(APP_NAME, _("Los archivos *.original.obsp son copias del original y nunca se "
+                                             "sobrescriben. Elige otro nombre."), parent=self)
             return
         self._start_save(target)
 
@@ -911,16 +957,18 @@ class ViewerApp(tk.Tk):
         if self._in_game_folder(target) and target not in self._game_save_confirmed:
             copy = saving.original_copy_path(target)
             copy_note = (
-                f"{copy.name} ya existe y no se tocará."
+                _("{copy} ya existe y no se tocará.").format(copy=copy.name)
                 if copy.exists()
-                else f"Antes se creará {copy.name}: copia exacta del archivo actual, verificada y de solo lectura."
+                else _("Antes se creará {copy}: copia exacta del archivo actual, verificada y de solo lectura.").format(
+                    copy=copy.name)
             )
             if not self.ask(
                 APP_NAME,
-                f"Vas a sobrescribir {target.name} en la instalación del juego.\n\n"
-                f"• {copy_note}\n"
-                "• Darksiders II debe estar cerrado.\n"
-                "• «Verificar integridad» de Steam devolverá el original.\n\n¿Guardar?",
+                _("Vas a sobrescribir {target} en la instalación del juego.\n\n"
+                  "• {copy_note}\n"
+                  "• Darksiders II debe estar cerrado.\n"
+                  "• «Verificar integridad» de Steam devolverá el original.\n\n¿Guardar?").format(
+                    target=target.name, copy_note=copy_note),
                 icon="warning",
             ):
                 return
@@ -932,13 +980,14 @@ class ViewerApp(tk.Tk):
             return
         if plan.warnings:
             listed = "\n".join(f"• {warning}" for warning in plan.warnings[:15])
-            more = f"\n… y {len(plan.warnings) - 15} más" if len(plan.warnings) > 15 else ""
-            if not self.ask(APP_NAME, f"Avisos antes de guardar:\n{listed}{more}\n\n¿Guardar de todos modos?",
-                            icon="warning"):
+            hidden = len(plan.warnings) - 15
+            more = "\n" + _("… y {count:,} más").format(count=hidden) if hidden > 0 else ""
+            if not self.ask(APP_NAME, _("Avisos antes de guardar:\n{warnings}\n\n¿Guardar de todos modos?").format(
+                    warnings=listed + more), icon="warning"):
                 return
         self.saving = True
         self._after_save = then
-        self.status_var.set(f"Guardando {target.name}…")
+        self.status_var.set(_("Guardando {name}…").format(name=target.name))
         self.progress.configure(mode="indeterminate")
         self.progress.start(15)
         rotating = self.rotating_var.get()
@@ -959,7 +1008,7 @@ class ViewerApp(tk.Tk):
                 if self.ask(APP_NAME, f"{message}\n\n¿Restaurar ahora la copia del original?", icon="error"):
                     self.restore_original_file(confirm=False)
                 return
-            messagebox.showerror(APP_NAME, f"No se guardó el archivo.\n\n{message}", parent=self)
+            messagebox.showerror(APP_NAME, _("No se guardó el archivo.\n\n{message}").format(message=message), parent=self)
             return
         target, plan, result = payload  # type: ignore[misc]
         assert document is not None
@@ -1237,9 +1286,9 @@ class ViewerApp(tk.Tk):
             view.show_goto()
 
     def full_label(self, path: tuple) -> str:
-        """``objeto · propiedad`` de una fila del objeto abierto (Copiar ruta completa)."""
+        """``objeto · propiedad`` de una fila del objeto abierto (Copiar ruta completa), como se ve."""
         assert self.document is not None and self.position is not None
-        return self.document.full_label(self.position, path)
+        return i18n.text(self.document.full_label(self.position, path))
 
     def go_to_location(self, text: str) -> None:
         """Intro en la barra «Ir a»: analiza la ruta y va a ella, quizá en otro objeto."""
@@ -1278,7 +1327,7 @@ class ViewerApp(tk.Tk):
         if not location.steps:
             view.goto_done()
             return
-        match = bod.find_path(self.document.bod(position), list(location.steps))
+        match = bod.find_path(self.document.bod(position), list(location.steps), vocabulary.NAMES)
         if match.path:
             view.reveal(match.path)
         if match.failed is None:
@@ -1286,28 +1335,117 @@ class ViewerApp(tk.Tk):
         else:
             view.goto_failed(match.message, match.failed.start, match.failed.end)
 
+    # --- Idioma (fase 12) -------------------------------------------------------------------
+
+    def change_language(self, code: str) -> bool:
+        """Cambia el idioma de la interfaz en caliente: reconstruye menús y paneles sin cerrar la ventana.
+
+        Se conservan el documento con sus cambios sin guardar, deshacer y rehacer (sus
+        descripciones se muestran en el idioma nuevo), el objeto y la fila seleccionados, el
+        historial, el índice, los filtros de la lista, la búsqueda en el objeto y el último texto
+        de «Ir a». Se cierran la búsqueda global y los cambios pendientes. Mientras se guarda, se
+        restaura o se exporta no se cambia. La elección se guarda al momento en ``config.json``.
+        Devuelve si el idioma quedó cambiado.
+        """
+        if code not in i18n.LANGUAGES:
+            raise ValueError(f"Idioma desconocido: {code!r}")
+        if code == i18n.language():
+            self.language_var.set(code)
+            return True
+        if self.saving or self.exporting:
+            self.language_var.set(i18n.language())
+            self.status_var.set(_("Espera a que termine la operación en curso para cambiar el idioma"))
+            return False
+        self.settings["language"] = code
+        if self.persist_settings:
+            self._store_settings()
+        state = self._view_state()
+        i18n.set_language(code)
+        self.language_var.set(code)
+        self._rebuild_ui(state)
+        self.status_var.set(_("Idioma de la interfaz: {language}").format(language=i18n.LANGUAGES[code]))
+        return True
+
+    def _view_state(self) -> dict[str, object]:
+        """Lo que se ve y no depende del idioma, para recuperarlo tras reconstruir la ventana."""
+        view = self.property_view
+        selected = view.selected()
+        name, kind, value = view.search_query()
+        return {
+            "path": selected[1] if selected else None,
+            "search": (name, vocabulary.canonical_type(kind), value),
+            "goto": view.goto_var.get(),
+            "filters": self.object_tree.filters(),
+            "sashes": [self.pane.sashpos(index) for index in range(2)],
+        }
+
+    def _rebuild_ui(self, state: dict[str, object]) -> None:
+        view = self.property_view
+        view.cancel_edit()
+        view.cancel_pending()
+        self.object_tree.cancel_pending()
+        self._close_secondary_windows()
+        _release_traces(self.object_tree)
+        _release_traces(view)
+        _release_traces(self.details)
+        for child in list(self.children.values()):
+            child.destroy()
+        self._decoding = None
+        self._pending_location = None
+        self._build_menu()
+        self._build_ui()
+        view = self.property_view
+        name, kind, value = state["search"]  # type: ignore[misc]
+        view.set_search_query(name, vocabulary.shown_type(kind), value)
+        view.goto_var.set(str(state["goto"]))
+        self._update_history_buttons()
+        if self.document is not None:
+            self._show_document()
+            self.object_tree.restore_filters(state["filters"])  # type: ignore[arg-type]
+            if self.position is not None:
+                self.object_tree.select_position(self.position)
+                self._show_object(self.position, state["path"])  # type: ignore[arg-type]
+        else:
+            self._update_title()
+        sashes = state["sashes"]
+
+        def place() -> None:
+            self._sash_after = None
+            for index, position in enumerate(sashes):  # type: ignore[arg-type]
+                self.pane.sashpos(index, position)
+
+        if self._sash_after is not None:
+            self.after_cancel(self._sash_after)
+        self._sash_after = self.after_idle(place)
+        # Los paneles viejos forman ciclos: se recogen aquí, en el hilo de Tk, y no cuando al
+        # recolector le toque en un hilo de trabajo (sus variables de Tk no se borran desde otro hilo).
+        gc.collect()
+
     # --- Cierre --------------------------------------------------------------------------
 
     def _about(self) -> None:
         messagebox.showinfo(
             APP_NAME,
-            f"{APP_NAME} {__version__}\n\nVisor y editor de scripts.obsp de Darksiders II "
-            "Deathinitive Edition.\n\nLicencia MIT · BOTProT800",
+            _("{app} {version}\n\nVisor y editor de scripts.obsp de Darksiders II Deathinitive Edition."
+              "\n\nLicencia MIT · BOTProT800").format(app=APP_NAME, version=__version__),
             parent=self,
         )
 
     def _on_close(self) -> None:
-        if not self._resolve_unsaved("salir", then=self._close_now):
+        if not self._resolve_unsaved(_("¿Guardarlos antes de salir?"), then=self._close_now):
             return
         self._close_now()
+
+    def _store_settings(self) -> None:
+        self.settings["geometry"] = self.geometry()
+        self.settings["group_by"] = self.object_tree.group_mode
+        self.settings["rotating_backups"] = bool(self.rotating_var.get())
+        save_settings(self.settings)
 
     def _close_now(self) -> None:
         self.index_cancel.set()
         if self.persist_settings:
-            self.settings["geometry"] = self.geometry()
-            self.settings["group_by"] = self.object_tree.group_var.get()
-            self.settings["rotating_backups"] = bool(self.rotating_var.get())
-            save_settings(self.settings)
+            self._store_settings()
         self.destroy()
 
     def destroy(self) -> None:
@@ -1315,12 +1453,29 @@ class ViewerApp(tk.Tk):
         if self._poll_id is not None:
             self.after_cancel(self._poll_id)
             self._poll_id = None
+        if self._sash_after is not None:
+            self.after_cancel(self._sash_after)
+            self._sash_after = None
         if self.search_window is not None and self.search_window.winfo_exists():
             self.search_window.close()
         self.property_view.cancel_edit()
         self.property_view.cancel_pending()
         self.object_tree.cancel_pending()
         super().destroy()
+        # El idioma es del proceso: al cerrar la ventana vuelve el de la CLI (y cada test empieza igual).
+        i18n.reset()
+
+
+def _release_traces(panel: object) -> None:
+    """Quita las trazas de las variables de Tk de ``panel`` antes de destruirlo.
+
+    Tcl guarda la función de cada traza, y esa función retiene el panel: sin esto, un panel
+    sustituido al cambiar de idioma no se liberaría nunca.
+    """
+    for value in vars(panel).values():
+        if isinstance(value, tk.Variable):
+            for modes, callback in value.trace_info():
+                value.trace_remove(modes, callback)
 
 
 def main(initial: Path | None = None) -> None:

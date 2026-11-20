@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from ..binary import TEXT_ENCODING, U32
 from ..errors import FormatError
+from ..i18n import N_
 from . import bod
 from .bod import Name
 
@@ -65,13 +66,13 @@ OPCODES: dict[int, Opcode] = {
         _op(0x17, NONE, 187), _op(0x18, NONE, 165), _op(0x19, NONE, 541), _op(0x1A, NONE, 26),
         _op(0x1B, NONE, 1135), _op(0x1E, NONE, 314), _op(0x1F, NONE, 314), _op(0x20, NAME, 314),
         _op(0x21, NONE, 1989), _op(0x22, FLOAT32, 1113, "float"), _op(0x23, INT32, 32353, "int"),
-        _op(0x24, NAME, 12391, "cadena"), _op(0x25, BOOL, 5039, "bool"), _op(0x26, NAME, 42),
-        _op(0x27, NAME, 3308), _op(0x28, NAME, 3702, "parámetro"), _op(0x29, NONE, 7736),
+        _op(0x24, NAME, 12391, N_("cadena", "tipo")), _op(0x25, BOOL, 5039, "bool"), _op(0x26, NAME, 42),
+        _op(0x27, NAME, 3308), _op(0x28, NAME, 3702, N_("parámetro", "tipo")), _op(0x29, NONE, 7736),
         _op(0x2A, NONE, 5026), _op(0x2B, NONE, 5026), _op(0x2C, NAME, 47470), _op(0x2D, WORD, 9091),
-        _op(0x2E, NONE, 1129), _op(0x2F, NONE, 9709, "fin"), _op(0x30, NONE, 2270),
+        _op(0x2E, NONE, 1129), _op(0x2F, NONE, 9709, N_("fin", "tipo")), _op(0x30, NONE, 2270),
         _op(0x31, NONE, 19), _op(0x32, NONE, 23799), _op(0x34, NONE, 1033), _op(0x35, NONE, 23644),
-        _op(0x36, NAME, 5), _op(0x38, NAME, 18756, "método"), _op(0x39, NAME, 6329, "llamada"),
-        _op(0x3A, NAME, 19286), _op(0x3B, LINE, 64366, "línea"), _op(0x3D, NONE, 268),
+        _op(0x36, NAME, 5), _op(0x38, NAME, 18756, N_("método", "tipo")), _op(0x39, NAME, 6329, N_("llamada", "tipo")),
+        _op(0x3A, NAME, 19286), _op(0x3B, LINE, 64366, N_("línea", "tipo")), _op(0x3D, NONE, 268),
         _op(0x3E, NONE, 24), _op(0x43, NONE, 2),
     )
 }

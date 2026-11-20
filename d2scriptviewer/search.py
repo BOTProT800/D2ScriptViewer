@@ -22,14 +22,16 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
+from . import i18n, vocabulary
 from .binary import F32, I32, TEXT_ENCODING
 from .document import Document
 from .errors import FormatError
 from .formats import bod
+from .i18n import N_
 
 DEFAULT_LIMIT = 2000
-#: Valor del campo Tipo que no filtra (la primera opción del desplegable).
-ANY_TYPE = "(cualquiera)"
+#: Valor del campo Tipo que no filtra (la primera opción del desplegable); se muestra con ``_()``.
+ANY_TYPE = N_("(cualquiera)")
 
 RefLabel = Callable[[tuple[int, int]], str]
 
@@ -200,22 +202,20 @@ def search(
 
 def row_value_text(node: object, ref_label: RefLabel | None = None) -> str:
     """Texto de la columna «Valor» del panel de propiedades; en una referencia, ``→`` y el destino."""
-    if ref_label is not None and isinstance(node, bod.ExternalRef):
-        return f"→ {ref_label(node.identity)}"
-    return bod.value_text(node)
+    return vocabulary.value_text(node, ref_label)
 
 
-def _rows(root: object) -> Iterator[tuple[bod.Path, str, object]]:
-    """(ruta, etiqueta, nodo) de cada fila, en el orden del árbol y sin la raíz (que no es una fila)."""
+def _rows(document: bod.BodDocument) -> Iterator[tuple[bod.Path, str, object]]:
+    """(ruta, etiqueta como se ve, nodo) de cada fila, en el orden del árbol y sin la raíz (que no es una fila)."""
     stack: list[tuple[bod.Path, str, object]] = []
 
     def push(path: bod.Path, node: object) -> None:
         kids = bod.children(node)
         for index in range(len(kids) - 1, -1, -1):
             label, child = kids[index]
-            stack.append((path + (index,), label, child))
+            stack.append((path + (index,), vocabulary.row_label(document, path, node, label), child))
 
-    push((), root)
+    push((), document.root)
     while stack:
         path, label, node = stack.pop()
         yield path, label, node
@@ -224,13 +224,16 @@ def _rows(root: object) -> Iterator[tuple[bod.Path, str, object]]:
 
 def tree_types(document: bod.BodDocument) -> list[str]:
     """Los tipos de las filas del objeto (columna «Tipo»), sin repetir y en orden alfabético."""
-    return sorted({bod.type_text(node) for _path, _label, node in _rows(document.root)} - {""}, key=str.casefold)
+    return sorted({vocabulary.type_text(node) for _path, _label, node in _rows(document)} - {""}, key=str.casefold)
+
+
+def _is_any_type(kind: str) -> bool:
+    return kind in ("", *(text.casefold() for text in i18n.variants(ANY_TYPE)))
 
 
 def is_empty_query(name: str, type_name: str, value: str) -> bool:
-    """Con los tres campos vacíos (o Tipo en «(cualquiera)») no hay búsqueda."""
-    kind = type_name.strip().casefold()
-    return not name.strip() and not value.strip() and kind in ("", ANY_TYPE.casefold())
+    """Con los tres campos vacíos (o Tipo en «(cualquiera)», en cualquier idioma) no hay búsqueda."""
+    return not name.strip() and not value.strip() and _is_any_type(type_name.strip().casefold())
 
 
 def find_in_tree(
@@ -243,21 +246,22 @@ def find_in_tree(
     """Rutas de las filas que cumplen todos los campos no vacíos, en el orden de las filas.
 
     Nombre y Valor buscan el texto contenido; Tipo, el tipo exacto. Ninguno
-    distingue mayúsculas. El orden de las filas es el lexicográfico de sus rutas,
+    distingue mayúsculas. Las tres columnas se comparan como se ven, en el idioma de la
+    interfaz (:mod:`.vocabulary`). El orden de las filas es el lexicográfico de sus rutas,
     así que el resultado sirve para buscar el siguiente con :mod:`bisect`.
     """
     if is_empty_query(name, type_name, value):
         return []
     name_needle = name.strip().casefold()
     kind = type_name.strip().casefold()
-    if kind == ANY_TYPE.casefold():
+    if _is_any_type(kind):
         kind = ""
     value_needle = value.strip().casefold()
     found = []
-    for path, label, node in _rows(document.root):
+    for path, label, node in _rows(document):
         if name_needle and name_needle not in label.casefold():
             continue
-        if kind and bod.type_text(node).casefold() != kind:
+        if kind and vocabulary.type_text(node).casefold() != kind:
             continue
         if value_needle and value_needle not in row_value_text(node, ref_label).casefold():
             continue
