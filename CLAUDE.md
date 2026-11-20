@@ -38,9 +38,9 @@ barra en el panel de propiedades con un campo por columna, Ctrl+F para el objeto
 para la búsqueda global; sus dos tests con el archivo real (`RealTreeSearchTests`) pasan. Fase 11
 (ir a una ruta) cerrada el 9 de octubre de 2026: Ctrl+G abre una barra «Ir a» que lee la ruta de
 «Copiar ruta de la propiedad» o `objeto · propiedad` y salta a esa fila. Versión 1.1.0
-preparada el 7 de noviembre de 2026 (fases 10 y 11 y pruebas de audio). La 1.0.0 nunca se
-etiquetó, y `release.yml` aún no se ha ejecutado en GitHub. El repositorio es público. El push y
-la etiqueta `v1.1.0` los hace el usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+publicada en GitHub el 19 de noviembre de 2026: fases 10 y 11, pruebas de audio y esquivas. Es la
+primera release; la 1.0.0 nunca se etiquetó. El repositorio es público. El push y las etiquetas
+los decide el usuario; para la 1.1.0 pidió que los hiciera Claude. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -271,8 +271,12 @@ encuentran.
 - **Juego**: `C:\Program Files (x86)\Steam\steamapps\common\Darksiders II Deathinitive Edition`.
   `media\scripts.obsp` está suelto, no dentro de los `.upak`. El SHA-256 de
   `Darksiders2.exe` es `5580738EF70BC5BBCC72D7DC4A9C319956CD14DBFEF6F9DBEC54C1B5D97799FB`.
-- **Copia para experimentos**: `C:\Users\vicen\Documents\Extractions\Darksiders\scripts.obsp`,
-  idéntica al original.
+- **Copia para experimentos**: la de `C:\Users\vicen\Documents\Extractions\Darksiders\scripts.obsp`
+  ya no existe; esa carpeta solo tiene `media\` extraído (comprobado el 19 de noviembre de 2026).
+  Para los tests con el archivo real, si el instalado está modificado:
+  1. copia `media\scripts.original.obsp` del juego fuera del repositorio;
+  2. comprueba que su SHA es el de Steam;
+  3. apunta `D2SV_OBSP` a esa copia.
 - **`..\Darksiders2DLL`** (C++, proxy `dinput8.dll`):
   - No lee, fija ni redirige `scripts.obsp`: su mod de inventario (`scripts=inventory`) se
     abandonó y eliminó el 4 de octubre de 2026. No propongas avisos ni trabajo sobre ese modo.

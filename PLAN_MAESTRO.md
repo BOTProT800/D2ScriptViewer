@@ -1,5 +1,24 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Versión 1.1.0 publicada (2026-11-19).** El usuario pidió esta vez que el push y la etiqueta
+> los hiciera Claude. La etiqueta anotada `v1.1.0` apunta a `b8164fd`.
+>
+> - **Workflow:** la primera ejecución de `release.yml` (run 44655192216) terminó bien, con los
+>   dos jobs (`verificar` y `windows`) en verde, en unos dos minutos.
+> - **Release:** https://github.com/BOTProT800/D2ScriptViewer/releases/tag/v1.1.0, publicada y
+>   sin marcar como borrador ni prerelease. Lleva:
+>   - `D2ScriptViewer.exe` (11,9 MB);
+>   - la rueda y el `.tar.gz` de la 1.1.0;
+>   - `LICENSE`, `LICENSE-Python.txt`, `LICENSE-PyInstaller.txt`, `LICENSE-TclTk.txt`,
+>     `THIRD_PARTY_NOTICES.md` y `VERSIONES.txt`.
+> - **Pendiente:** las notas automáticas solo traen el enlace a los commits. La sección 1.1.0 del
+>   `CHANGELOG.md` se puede pegar desde la web.
+> - **Tests en local:** con el `scripts.obsp` instalado, 14 tests fallan porque comparan con el
+>   SHA de Steam y la instalación lleva el cambio de las esquivas (`5ECCFA9E…`). Con una copia
+>   del original (SHA `B46DD3DA…`) en `D2SV_OBSP` pasan los 269. La copia de experimentos de
+>   `Extractions\Darksiders` ya no existe.
+> - **La 1.0.0** nunca se etiquetó ni se publicó: la primera release de GitHub es la 1.1.0.
+
 > **Versión 1.1.0 preparada (2026-11-07).** `__version__` pasa a `1.1.0` y la sección
 > `[Unreleased]` del `CHANGELOG.md` queda como `[1.1.0]`. La fecha cambió a 2026-11-19, el día de
 > la etiqueta. La versión recoge las fases 10 y 11, las pruebas de audio y, desde el 19 de
