@@ -272,3 +272,56 @@ Detalle y evidencia en `research/PRUEBAS_EN_JUEGO.md` (secciones «Audio»).
   - si el banco se carga por el `Bank` del `SoundDesc` o ya estaba cargado (todos al empezar,
     por ejemplo). Se distinguiría nombrando el banco de Death con un evento del Archon;
   - las pruebas 3 (banco nuevo) y 4 (`SoundDesc` nuevo con un `SoundTrigger`).
+
+## 2026-11-14 — Esquivas de Death y copias incrustadas
+
+### La cadena de esquivas
+
+Death encadena tres esquivas seguidas. El número lo fija `TargetEvadeNumber`, el único campo de un
+`PlayerEvadeCountConditional`, dentro del condicional `--(Evade)(End)` (ID 1317227686,
+`Conditionals[2]`). En el original vale 2, y las tres salen de contar desde cero.
+
+La máquina de estados está en `death/playercommon_movestates`:
+
+- `Evade - Switch` (1268861345) es la puerta de entrada. Llegan a ella unas ochenta transiciones
+  `--(OnEvade)-(OnDown)` desde ataques, caídas, impactos e inactividad, y también las propias
+  esquivas. Su primera transición consulta `--(OnEvadeCount)` (1268861450) y, si se cumple, va a
+  `Evade - Switch - End`; si no, a `Evade - Switch - Ground`.
+- `Evade - Switch - Ground` (1267482247) consulta `--(Evade)(End)` **antes** de abrirse en
+  direcciones. Si el contador no ha llegado, reparte por palanca y cámara: `Evade - Backward`,
+  `Evade - Left`, `Evade - Right`, `Evade - Dash` hacia delante y las variantes `- Target Cam`.
+- `Evade - Switch - End` (1268326765) reparte con los **mismos** condicionales de dirección, pero
+  hacia las variantes `- End`.
+
+Las ocho variantes `- End` llevan `IsTerminalEvade` en verdadero y ninguna tiene una ventana de
+entrada que vuelva al switch, así que la cadena termina ahí. Las normales sí vuelven: las tres
+laterales por `--EvadeToEvade`, que se abre en el fotograma 18, y la frontal y el dash por
+`--EvadeDash`, en el 10.
+
+Como el contador se consulta aguas arriba del reparto por dirección, **un solo valor gobierna las
+cuatro direcciones y los dos modos de cámara**. `death/death_desc · EvadeResetDelay` vale 0,4 s y
+es lo que tarda el contador en reiniciarse.
+
+El segundo `PlayerEvadeCountConditional`, el de `--(OnEvadeCount)` (`Conditionals[91]`), no tiene
+ningún campo escrito: usa el valor por defecto de la clase, que no está en el obsp. En total hay
+cuatro instancias de esa clase en el archivo, dos por cada copia de la lista.
+
+### Copias incrustadas, y por qué importan al editar
+
+`death/death_desc` incrusta tres subárboles que son copia **byte a byte** de un objeto suelto:
+
+| Propiedad de `death_desc` | Clase | Copia de |
+|---|---|---|
+| `Conditionals` | `CharacterConditionalList` | `death/death_conditionals` |
+| `InputWindows` | `InputWindowList` | `death/death_windows` |
+| `Visuals` | `VisualList` | `death/death_visuals` |
+
+No es cosa de Death. En el original hay **432** subárboles incrustados que son copia exacta de
+algún objeto suelto, sobre todo `tbehavior` (115), `VisualList` (66), `quest` (62), `SoundList`
+(60) y `CharacterConditionalList` (55). `base/quests` se lleva 62, una por misión.
+
+Consecuencia para quien edita: cambiar una copia **no** cambia la otra, y las dos conviven en el
+mismo archivo sin que nada lo señale. Ni `validation.py` ni `verify` avisan, porque cada copia es
+coherente por separado, con sus hashes cuadrados y su blob recodificado idéntico. Para la esquiva,
+la prueba en el juego apunta a que el juego lee la copia de `death_desc` y no el objeto suelto
+(`research/PRUEBAS_EN_JUEGO.md`, 2026-11-14).

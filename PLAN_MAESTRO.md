@@ -1,8 +1,9 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
 > **Versión 1.1.0 preparada (2026-11-07).** `__version__` pasa a `1.1.0` y la sección
-> `[Unreleased]` del `CHANGELOG.md` queda como `[1.1.0] - 2026-11-07`. La versión recoge las
-> fases 10 y 11 y las pruebas de audio.
+> `[Unreleased]` del `CHANGELOG.md` queda como `[1.1.0]`. La fecha cambió a 2026-11-19, el día de
+> la etiqueta. La versión recoge las fases 10 y 11, las pruebas de audio y, desde el 19 de
+> noviembre, la prueba de las esquivas del 14 de noviembre, que también entra en `GUIA_MODDER.md`.
 >
 > - **Estado en GitHub:**
 >   - el repositorio es público y `main` estaba al día con `origin/main` (`0ef4eed`), con la CI

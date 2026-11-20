@@ -568,3 +568,55 @@ Lo que esta prueba no distingue:
   evento del Archon: si también suena, el campo `Bank` no decide qué se carga.
 - **Si funciona con un banco nuevo**, que no venga con el juego (prueba 3 de
   `research/FORMATO.md`).
+
+## Esquivas encadenadas de Death (2026-11-14)
+
+El usuario preguntó qué valor fija las tres esquivas seguidas, lo cambió y probó en el juego.
+Informó: «en efecto `PlayerEvadeCountConditional` controla las evasiones normales hasta donde pude
+probar».
+
+### El valor
+
+`TargetEvadeNumber = 2`, en el condicional `--(Evade)(End)`. Está dos veces en el archivo, con la
+misma ruta dentro de cada copia:
+
+- `death/death_conditionals · Conditionals[2].ConditionalInput[0].TargetEvadeNumber`
+- `death/death_desc · Conditionals.Conditionals[2].ConditionalInput[0].TargetEvadeNumber`
+
+El mecanismo completo y las copias incrustadas, en `research/FORMATO.md` (2026-11-14).
+
+### Evidencia en la instalación
+
+Leída después del informe y solo para leer. El usuario guardó tras cada cambio, así que las copias
+rotativas reconstruyen la secuencia. `EvadeResetDelay` siguió en 0,4 en todas.
+
+| Hora | `death_conditionals` | `death_desc` | SHA | Qué es |
+|---|---|---|---|---|
+| — | 2 | 2 | `B46DD3DA…` | el original de Steam, 4 de octubre |
+| 12:27 | **8** | 2 | `803A868A…` | solo el objeto suelto |
+| 12:28 | 2 | 2 | `B46DD3DA…` | revertido, idéntico al original |
+| 16:10 | **8** | 2 | `803A868A…` | otra vez solo el objeto suelto |
+| 16:11 | 2 | 2 | `B46DD3DA…` | revertido, idéntico al original |
+| 16:19 | 2 | **6** | `0A4E5281…` | solo la copia de `death_desc` |
+| 16:19 | 2 | **12** | `5ECCFA9E…` | el instalado al escribir esto |
+
+`scripts.original.obsp` sigue intacto y en solo lectura (4 de octubre, 03:42). Las dos vueltas
+atrás reprodujeron el SHA de Steam exacto, así que el invariante de ida y vuelta se cumplió dos
+veces sobre el archivo real y sobre la instalación. `verify` da correcto sobre el instalado actual:
+los 4 172 BOD se recodifican idénticos y los 3 690 scripts se reserializan idénticos.
+
+### Qué se puede concluir y qué no
+
+- **El mecanismo se cumple.** Subir `TargetEvadeNumber` alarga la cadena de esquivas normales.
+- **Apunta a que el juego lee la copia de `death_desc`** y no `death/death_conditionals`. Es una
+  deducción de la secuencia de guardados, no una observación directa: los dos intentos sobre el
+  objeto suelto se revirtieron, y a partir de ahí solo se tocó la copia de `death_desc`, primero a
+  6 y luego a 12.
+- **Queda por confirmar** con una prueba de un solo cambio: un valor alto solo en
+  `death/death_conditionals`, dejando `death_desc` en 2. Si siguen saliendo tres esquivas, para
+  esto el objeto suelto no se usa.
+- **No se probó** el valor por defecto de `--(OnEvadeCount)`, que no está en el obsp, ni si el
+  contador gobierna también las esquivas de la forma Segador y las del rifle de dos manos, que son
+  `PlayerEvadeDesc` de otras listas.
+- **El archivo instalado queda con las dos copias en desacuerdo**, 2 en el objeto suelto y 12 en
+  `death_desc`. Nada en la herramienta lo señala.

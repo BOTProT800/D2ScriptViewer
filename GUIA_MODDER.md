@@ -223,11 +223,13 @@ guarda la partida mientras un cambio lo tiene en mal estado, esa partida puede q
 | Texto sin hash más largo | `base/quest_test_dialog` (`DialogSet`) | `Dialogs[0].Actions[1].FlagID` | +5 caracteres | El archivo cambia de tamaño y el juego lo carga |
 | Sonido de una acción | `death/death_sounds` (`SoundList`) | `Sounds[47].Event`, la entrada con `Name` = `death_whoosh_jump` | `Jump_Whoosh` → `Voc_Death_Death` | Saltar suena al grito de muerte de Death |
 | Sonido de otro personaje | `death/death_sounds` | `Sounds[47].Bank` y `Sounds[47].Event` | `SFX_Character_Archon` y `Voc_Archon_Corrupted_Scream` | El doble salto suena al grito del Archon, también lejos de su zona |
+| Esquivas seguidas | `death/death_desc` (`Desc`) | `Conditionals.Conditionals[2].ConditionalInput[0].TargetEvadeNumber` (int), en el condicional `--(Evade)(End)` | 2 → 6 o 12 | Death encadena más esquivas normales que las tres de siempre |
 
 Las rutas de la columna Propiedad se pueden pegar en Ctrl+G con el objeto abierto, o con el
 objeto delante: `death/playercommon_movestates · MoveStates[44].JumpImpulse`,
-`ui_core/pausemenu · Funciones.onInit.0x004E`, `base/quest_test_dialog · Dialogs[0].Actions[1].FlagID`
-o `death/death_sounds · Sounds[47].Event`.
+`ui_core/pausemenu · Funciones.onInit.0x004E`, `base/quest_test_dialog · Dialogs[0].Actions[1].FlagID`,
+`death/death_sounds · Sounds[47].Event` o
+`death/death_desc · Conditionals.Conditionals[2].ConditionalInput[0].TargetEvadeNumber`.
 En `Animations[n].AnimationName`, cambia `n` por el índice de la animación.
 
 Lo que enseñan esas pruebas:
@@ -251,6 +253,14 @@ Lo que enseñan esas pruebas:
   Ctrl+Mayús+F. Que el juego cargue un banco nuevo, que no venga con él, está sin probar.
 - **Elige para probar un sonido que se repita y se oiga bien.** Un silbido corto que desaparece se
   nota poco; un grito donde había un silbido, sí.
+- **Hay datos que están dos veces.** `death/death_desc` lleva dentro una copia exacta de
+  `death/death_conditionals` (en `Conditionals`), de `death/death_windows` (`InputWindows`) y de
+  `death/death_visuals` (`Visuals`). En todo el archivo hay 432 copias así. Cambiar una no cambia
+  la otra, y la herramienta no avisa. Para las esquivas, el cambio funcionó en la copia de
+  `death_desc`. Que el objeto suelto no cuente es una deducción, aún sin confirmar con una prueba
+  de un solo cambio. Si un cambio no se nota, prueba en la otra copia.
+- **Un solo valor manda en todas las esquivas normales**, en las cuatro direcciones y con o sin
+  cámara fija. Las de la forma Segador y las del rifle de dos manos están sin probar.
 
 ### No probado en el juego: los huecos del inventario
 
@@ -287,7 +297,7 @@ Categorías del archivo (columna «Tipo» de la lista de objetos y filtro **Tipo
 | `SoundList` | 275 | Sonidos por personaje (`ID`, `Name`, `Bank`, `Event`) | Cambiar sonidos (probado) |
 | `HitInfoList` | 3 | Información de golpes | Por explorar |
 | `InputWindowList` | 5 | Ventanas de entrada (combos, por el nombre) | Por explorar |
-| `CharacterConditionalList` | 7 | Condiciones por personaje | Por explorar |
+| `CharacterConditionalList` | 7 | Condiciones por personaje | Esquivas seguidas (probado en la copia de `death_desc`), y por explorar el resto |
 | `ModuleSystem` | 4 | Grafos de módulos | Por explorar |
 | `TerrainMaterialDesc` | 42 | Materiales del terreno | Por explorar |
 

@@ -7,7 +7,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-11-07
+## [1.1.0] - 2026-11-19
 
 ### Added
 
@@ -40,6 +40,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
     de la zona del Archon.
 
   `GUIA_MODDER.md` lo recoge en lo probado, con cómo cambiar un sonido.
+- Prueba en el juego de las esquivas (`research/PRUEBAS_EN_JUEGO.md`, `research/FORMATO.md`):
+  `TargetEvadeNumber`, en el condicional `--(Evade)(End)`, fija cuántas esquivas normales encadena
+  Death; subirlo alarga la cadena. Las notas cuentan también las copias incrustadas:
+  - `death/death_desc` lleva dentro copias exactas de `death/death_conditionals`,
+    `death/death_windows` y `death/death_visuals`, y en todo el archivo hay 432;
+  - para las esquivas, el juego parece leer la copia de `death_desc`.
+
+  `GUIA_MODDER.md` lo recoge, con el aviso de que cambiar una copia no cambia la otra.
+- `D2ScriptViewer.bat` abre la GUI con Python desde la carpeta del repositorio.
 
 ### Changed
 
