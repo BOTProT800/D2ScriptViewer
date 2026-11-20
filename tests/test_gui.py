@@ -1382,29 +1382,29 @@ class LanguageGuiTests(TempDirMixin, unittest.TestCase):
         from d2scriptviewer import i18n, settings
 
         folder = self.make_temp_dir()
-        with mock.patch.dict(os.environ, {"APPDATA": str(folder), i18n.LANGUAGE_ENV: ""}), \
-                mock.patch.object(i18n, "system_language", return_value="es"):
+        with mock.patch.dict(os.environ, {"APPDATA": str(folder), i18n.LANGUAGE_ENV: "", "LANG": "es_ES.UTF-8"}):
             app = self.make_app(persist_settings=True)
             try:
-                self.assertEqual(i18n.language(), "es")
-                self.assertFalse(settings.config_path().exists())  # el primer arranque no guarda nada
-                self.assertTrue(app.change_language("en"))
-                self.assertEqual(json.loads(settings.config_path().read_text(encoding="utf-8"))["language"], "en")
-            finally:
-                app.destroy()
-            app = self.make_app(persist_settings=True)
-            try:
-                self.assertEqual((i18n.language(), app.language_var.get()), ("en", "en"))
+                self.assertEqual(i18n.language(), "en")  # el primer arranque es en inglés
                 self.assertIn("File", menu_labels(app))
+                self.assertFalse(settings.config_path().exists())  # y no guarda nada
+                self.assertTrue(app.change_language("es"))
+                self.assertEqual(json.loads(settings.config_path().read_text(encoding="utf-8"))["language"], "es")
             finally:
                 app.destroy()
-            with mock.patch.dict(os.environ, {i18n.LANGUAGE_ENV: "es"}):
+            app = self.make_app(persist_settings=True)
+            try:
+                self.assertEqual((i18n.language(), app.language_var.get()), ("es", "es"))
+                self.assertIn("Archivo", menu_labels(app))
+            finally:
+                app.destroy()
+            with mock.patch.dict(os.environ, {i18n.LANGUAGE_ENV: "en"}):
                 app = self.make_app(persist_settings=True)
                 try:
-                    self.assertEqual(i18n.language(), "es")  # D2SV_LANG manda y no se guarda
+                    self.assertEqual(i18n.language(), "en")  # D2SV_LANG manda y no se guarda
                 finally:
                     app.destroy()
-            self.assertEqual(json.loads(settings.config_path().read_text(encoding="utf-8"))["language"], "en")
+            self.assertEqual(json.loads(settings.config_path().read_text(encoding="utf-8"))["language"], "es")
         self.assertEqual(i18n.language(), "es")  # cerrar la ventana devuelve el idioma de la CLI
 
 

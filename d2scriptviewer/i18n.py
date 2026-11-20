@@ -26,15 +26,15 @@ interfaz separa los miles con un espacio duro («7 862»).
 
 from __future__ import annotations
 
-import locale
 import os
 import string
-import sys
 
 SPANISH = "es"
 ENGLISH = "en"
 #: Los idiomas de la interfaz, con su nombre en su propio idioma (el menú los muestra así).
 LANGUAGES = {ENGLISH: "English", SPANISH: "Español"}
+#: El idioma de la interfaz mientras no se elija otro en el menú.
+DEFAULT_LANGUAGE = ENGLISH
 #: Variable de entorno que fija el idioma de la interfaz sin guardarlo (tests y revisión).
 LANGUAGE_ENV = "D2SV_LANG"
 #: El menú de idioma se entiende en los dos idiomas: no se traduce.
@@ -42,8 +42,6 @@ MENU_LABEL = "Idioma / Language"
 
 #: Separador de miles de ``{n:,}`` en cada idioma de la interfaz.
 _GROUPING = {SPANISH: " ", ENGLISH: ","}
-#: Idioma de Windows: el identificador principal del español (``LANG_SPANISH``).
-_LANG_SPANISH = 0x0A
 
 _language = SPANISH
 _grouping = ","
@@ -203,34 +201,15 @@ def text(value: object) -> str:
 # --- Idioma inicial -------------------------------------------------------------------------
 
 
-def system_language() -> str:
-    """``es`` si el idioma de la pantalla de Windows es el español; si no, ``en``.
-
-    Es el idioma de la interfaz de Windows (``GetUserDefaultUILanguage``), no el formato
-    regional. Fuera de Windows (la CI en Linux) se miran las variables de ``locale``.
-    """
-    if sys.platform == "win32":
-        try:
-            import ctypes
-
-            langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()  # type: ignore[attr-defined]
-        except (AttributeError, OSError):
-            langid = None
-        if langid:
-            return SPANISH if langid & 0x3FF == _LANG_SPANISH else ENGLISH
-    for value in (os.environ.get("LC_ALL"), os.environ.get("LC_MESSAGES"), os.environ.get("LANG"),
-                  locale.getlocale()[0]):
-        if value:
-            lowered = value.lower()
-            return SPANISH if lowered.startswith(("es", "spanish")) else ENGLISH
-    return ENGLISH
-
-
 def initial_language(saved: object) -> str:
-    """El idioma con que arranca la interfaz: ``D2SV_LANG``, luego el guardado y luego el de Windows."""
+    """El idioma con que arranca la interfaz: ``D2SV_LANG``, luego el elegido en el menú y si no, inglés.
+
+    No se sigue el idioma de Windows: por decisión del usuario, la interfaz arranca en inglés
+    mientras no se elija otro idioma.
+    """
     forced = os.environ.get(LANGUAGE_ENV, "").strip().lower()
     if forced in LANGUAGES:
         return forced
     if isinstance(saved, str) and saved in LANGUAGES:
         return saved
-    return system_language()
+    return DEFAULT_LANGUAGE

@@ -251,31 +251,23 @@ class TemplateTests(unittest.TestCase):
 
 class InitialLanguageTests(unittest.TestCase):
     def test_order(self) -> None:
-        with mock.patch.dict(os.environ, {i18n.LANGUAGE_ENV: ""}), \
-                mock.patch.object(i18n, "system_language", return_value=i18n.ENGLISH):
+        """``D2SV_LANG``, luego lo elegido en el menú y, si no hay nada, inglés."""
+        with mock.patch.dict(os.environ, {i18n.LANGUAGE_ENV: ""}):
             self.assertEqual(i18n.initial_language(None), i18n.ENGLISH)
             self.assertEqual(i18n.initial_language("es"), i18n.SPANISH)
+            self.assertEqual(i18n.initial_language("en"), i18n.ENGLISH)
             self.assertEqual(i18n.initial_language("fr"), i18n.ENGLISH)  # un valor no válido se ignora
             self.assertEqual(i18n.initial_language(3), i18n.ENGLISH)
         with mock.patch.dict(os.environ, {i18n.LANGUAGE_ENV: " EN "}):
             self.assertEqual(i18n.initial_language("es"), i18n.ENGLISH)
+        with mock.patch.dict(os.environ, {i18n.LANGUAGE_ENV: "es"}):
+            self.assertEqual(i18n.initial_language(None), i18n.SPANISH)
 
-    @unittest.skipUnless(sys.platform == "win32", "idioma de la pantalla de Windows")
-    def test_windows_display_language(self) -> None:
-        import ctypes
-
-        for langid, expected in ((0x0C0A, i18n.SPANISH), (0x080A, i18n.SPANISH), (0x0409, i18n.ENGLISH),
-                                 (0x040C, i18n.ENGLISH)):
-            with self.subTest(langid=hex(langid)), \
-                    mock.patch.object(ctypes.windll.kernel32, "GetUserDefaultUILanguage", return_value=langid):
-                self.assertEqual(i18n.system_language(), expected)
-
-    def test_locale_fallback(self) -> None:
-        with mock.patch.object(i18n.sys, "platform", "linux"):
-            for value, expected in (("es_MX.UTF-8", i18n.SPANISH), ("en_US.UTF-8", i18n.ENGLISH),
-                                    ("Spanish_Spain", i18n.SPANISH), ("de_DE", i18n.ENGLISH)):
-                with self.subTest(valor=value), mock.patch.dict(os.environ, {"LC_ALL": value}):
-                    self.assertEqual(i18n.system_language(), expected)
+    def test_default_does_not_follow_the_system_language(self) -> None:
+        """Decisión del usuario (2026-11-20): sin nada elegido, inglés aunque Windows esté en español."""
+        self.assertEqual(i18n.DEFAULT_LANGUAGE, i18n.ENGLISH)
+        with mock.patch.dict(os.environ, {i18n.LANGUAGE_ENV: "", "LC_ALL": "es_MX.UTF-8", "LANG": "es_ES.UTF-8"}):
+            self.assertEqual(i18n.initial_language(None), i18n.ENGLISH)
 
     def test_language_is_a_known_setting(self) -> None:
         self.assertIn("language", settings.KNOWN_KEYS)

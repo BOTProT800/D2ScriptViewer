@@ -138,7 +138,8 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   plantilla cuyo `format` pone el separador de miles del idioma en `{n:,}` (espacio duro en el
   español de la interfaz). `Deferred` es un `str` con el texto español de siempre que `shown()`
   vuelve a componer en el idioma activo. `set_language`, `reset` (el estado de la CLI) e
-  `initial_language` (`D2SV_LANG`, `config.json`, idioma de la pantalla de Windows).
+  `initial_language` (`D2SV_LANG`, luego `config.json` y, si no hay nada, inglés: no se sigue el
+  idioma de Windows, por decisión del usuario del 20 de noviembre de 2026).
 - `i18n_en.py`: el catálogo inglés, `MESSAGES` (texto o `(contexto, texto)`) y `PLURALS`, en
   secciones por módulo unidas con `_merge`, que rechaza dos traducciones de una clave.
 - `vocabulary.py` (fase 12): **el núcleo nombra en español canónico** (etiquetas de ruta, tipos,

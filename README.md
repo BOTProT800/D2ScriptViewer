@@ -47,9 +47,9 @@ Abre el último archivo usado, el de `D2SV_OBSP` o el del juego. Abrir no bloque
 el archivo.
 
 **Idioma:** la interfaz está en español y en inglés. El menú **Idioma / Language** cambia de
-uno a otro al momento, sin cerrar la ventana ni perder los cambios, y recuerda la elección. La
-primera vez se usa el idioma de Windows. `D2SV_LANG=en` (o `es`) fija el idioma para esa sesión
-sin guardarlo. La línea de órdenes está solo en español. Los diálogos de abrir y guardar archivo
+uno a otro al momento, sin cerrar la ventana ni perder los cambios, y recuerda la elección.
+Mientras no elijas otro, arranca en inglés. `D2SV_LANG=en` (o `es`) fija el idioma para esa
+sesión sin guardarlo. La línea de órdenes está solo en español. Los diálogos de abrir y guardar archivo
 y los botones Sí/No siguen el idioma de Windows.
 
 - **Objetos** (izquierda): agrupados por carpeta del editor, ruta o tipo; filtros por tipo,

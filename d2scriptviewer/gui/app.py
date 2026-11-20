@@ -54,8 +54,8 @@ class ViewerApp(tk.Tk):
         persist_settings: bool = True,
         language: str | None = None,
     ) -> None:
-        """``language`` fija el idioma de la interfaz. Sin él, el de ``D2SV_LANG``, el guardado o el
-        de Windows; sin preferencias (los tests), el español.
+        """``language`` fija el idioma de la interfaz. Sin él, el de ``D2SV_LANG``, el elegido en el menú
+        o el inglés; sin preferencias (los tests), el español.
         """
         super().__init__()
         self.persist_settings = persist_settings

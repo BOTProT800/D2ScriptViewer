@@ -13,8 +13,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   Ayuda. El cambio se aplica al momento, sin cerrar la ventana: se conservan el archivo abierto,
   los cambios sin guardar, deshacer y rehacer, el objeto y la fila seleccionados, el historial,
   los filtros y la búsqueda; se cierran la búsqueda global y los cambios pendientes. La elección
-  se guarda en `config.json`. El primer arranque usa el idioma de la pantalla de Windows
-  (español si es español; si no, inglés), y `D2SV_LANG=en` o `es` lo fija sin guardarlo.
+  se guarda en `config.json`. Mientras no se elija otro, la interfaz arranca en inglés, sea cual
+  sea el idioma de Windows, y `D2SV_LANG=en` o `es` lo fija sin guardarlo.
 - En inglés, el árbol, «Copy Property Path», los mensajes y los textos de deshacer nombran las
   filas fijas de los scripts y de los pares en inglés (`Functions.onInit.0x004E`, `[3].value`).
   Ctrl+G acepta los dos vocabularios en los dos idiomas. Los parches guardan siempre la etiqueta

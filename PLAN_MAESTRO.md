@@ -1,5 +1,13 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Cambio de decisión (2026-11-20): la interfaz arranca en inglés por defecto.** Antes de
+> revisar el inglés, el usuario pidió que el idioma por defecto sea el inglés. Ya no se sigue el
+> idioma de Windows: manda `D2SV_LANG`, luego lo elegido en el menú «Idioma / Language» (guardado
+> en `config.json`) y, si no hay nada, inglés (`i18n.DEFAULT_LANGUAGE`). Se quitaron
+> `i18n.system_language` y sus tests; los nuevos comprueban que, sin nada elegido, arranca en
+> inglés aunque el entorno diga español. La CLI y el informe de la autoprueba siguen en español,
+> como se decidió.
+
 > **Fase 12 implementada (2026-11-19), pendiente de la revisión del inglés.** El usuario aprobó el
 > glosario y la muestra (con *range*, *original backup*, *param* y *Find in Object*). Falta, por
 > decisión del punto 7 de abajo, la documentación en inglés, que se escribe tras su revisión.
@@ -20,8 +28,8 @@
 >    restaurar y «Acerca de»: sí. Encontró dos restos reales («archivo abierto» como base del
 >    parche y el nombre por defecto `cambios.d2svpatch.json`). Comprobado con una mutación: quitar
 >    tres traducciones que el recorrido toca lo hace fallar.
-> 5. **Persistencia** (`InitialLanguageTests`, `LanguageGuiTests`): sí, también el idioma de
->    Windows simulado con `GetUserDefaultUILanguage`.
+> 5. **Persistencia** (`InitialLanguageTests`, `LanguageGuiTests`): sí. Desde el 2026-11-20, el
+>    primer arranque es en inglés aunque Windows esté en español (ver la nota de arriba).
 > 6. **Cambio en caliente:** sí. Medido con el archivo real: 72–112 ms con
 >    `death/playercommon_movestates`, `base/itemfoleytable` o `death/death` abiertos. Corregido al
 >    medir: las trazas de las variables retenían desde Tcl los paneles sustituidos, que el
@@ -71,6 +79,7 @@
 > 3. **Idioma inicial:** `D2SV_LANG` (nunca se guarda), luego `language` en `config.json`
 >    (solo se guarda al elegirlo en el menú) y luego el idioma de la pantalla de Windows
 >    (`GetUserDefaultUILanguage`): español si el idioma principal es el español; si no, inglés.
+>    **Cambiado el 2026-11-20** (nota de arriba): sin nada elegido, inglés.
 > 4. **Menú «Idioma / Language»**, antes de Ayuda, con «English» y «Español». El cambio se
 >    aplica en caliente: reconstruye menús y paneles sin cerrar la ventana y conserva el
 >    documento, los cambios sin guardar, deshacer y rehacer, el objeto y la fila, el historial,
@@ -1467,9 +1476,9 @@ Decisiones del 2026-11-19 en la nota del principio.
    objeto, los detalles, la búsqueda global, Cambios pendientes, el selector de referencias,
    Rellenar nulo, los errores de Ctrl+G, el contador de la barra y la barra de estado tras
    editar, deshacer y guardar.
-5. **Persistencia:** primer arranque con Windows en español y en inglés (simulado); elegir en
-   el menú lo guarda; una ventana nueva arranca en ese idioma; un valor no válido se ignora;
-   `D2SV_LANG` manda.
+5. **Persistencia:** el primer arranque es en inglés, aunque el entorno diga español (cambiado
+   el 2026-11-20; antes seguía el idioma de Windows); elegir en el menú lo guarda; una ventana
+   nueva arranca en ese idioma; un valor no válido se ignora; `D2SV_LANG` manda.
 6. **Cambio en caliente:** se conservan el documento, los cambios sin guardar, deshacer y
    rehacer (traducidos), el objeto y la fila; se rechaza mientras se guarda; los paneles
    sustituidos se liberan.
