@@ -116,23 +116,57 @@ def run_self_test(gui: bool = True) -> tuple[bool, list[str]]:
             raise FileNotFoundError(", ".join(missing))
         return f"{len(BUNDLED)} archivos"
 
+    def languages() -> str:
+        import string
+
+        from . import i18n, i18n_en
+
+        def fields(text: str) -> list[tuple[str, str, str | None]]:
+            return sorted((name, spec or "", conversion) for _text, name, spec, conversion
+                          in string.Formatter().parse(text) if name is not None)
+
+        wrong = [key for key, value in i18n_en.MESSAGES.items()
+                 if fields(value) != fields(key[1] if isinstance(key, tuple) else key)]
+        wrong += [key for key, forms in i18n_en.PLURALS.items()
+                  if [fields(form) for form in forms] != [fields(form) for form in key]]
+        if wrong:
+            raise AssertionError(f"marcadores distintos en {wrong[:3]}")
+        try:
+            i18n.set_language(i18n.ENGLISH)
+            english = i18n._("… y {count:,} más").format(count=7862)
+            i18n.set_language(i18n.SPANISH)
+            spanish = i18n._("… y {count:,} más").format(count=7862)
+        finally:
+            i18n.reset()
+        if (english, spanish) != ("… and 7,862 more", "… y 7 862 más"):
+            raise AssertionError(f"plantillas: {english!r}, {spanish!r}")
+        return f"catálogo inglés con {len(i18n_en.MESSAGES)} textos y {len(i18n_en.PLURALS)} plurales"
+
     def window() -> str:
+        from . import i18n
         from .gui.app import ViewerApp
 
-        # La ventana entera, oculta antes de dibujarse: sin abrir archivos ni guardar preferencias.
-        app = ViewerApp(auto_open=False, persist_settings=False)
-        try:
-            app.withdraw()
-            app.update_idletasks()
-            patchlevel = app.tk.call("info", "patchlevel")
-        finally:
-            app.destroy()
-        return f"ventana principal con Tcl/Tk {patchlevel}"
+        # La ventana entera en los dos idiomas, oculta antes de dibujarse: sin abrir archivos ni guardar preferencias.
+        menus = []
+        for code in (i18n.SPANISH, i18n.ENGLISH):
+            app = ViewerApp(auto_open=False, persist_settings=False, language=code)
+            try:
+                app.withdraw()
+                app.update_idletasks()
+                patchlevel = app.tk.call("info", "patchlevel")
+                menus.append(next(app.menubar.entrycget(index, "label") for index in range(app.menubar.index("end") + 1)
+                                  if app.menubar.type(index) == "cascade"))
+            finally:
+                app.destroy()
+        if menus != ["Archivo", "File"]:
+            raise AssertionError(f"menús: {menus}")
+        return f"ventana principal en español e inglés con Tcl/Tk {patchlevel}"
 
     check("Módulos", imports)
     check("Función de hash", hashing)
     check("OBSP sintético", roundtrip)
     check("Archivos incluidos", bundled)
+    check("Idiomas", languages)
     if gui:
         check("Interfaz", window)
     lines.append("Todo correcto" if ok else "HAY FALLOS")

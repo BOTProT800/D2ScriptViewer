@@ -237,7 +237,7 @@ class PatchFileTests(TempDirMixin, unittest.TestCase):
         patch_path = folder / "cambios.d2svpatch.json"
         code, out, err = run("patch", "crear", "--archivo", str(modified), "--base", str(original), "--salida", str(patch_path))
         self.assertEqual(code, 0, err)
-        self.assertIn("1 objetos, 1 operaciones (1 insertar)", out)
+        self.assertIn("1 objeto, 1 operación (1 insertar)", out)
         result = folder / "reaplicado.obsp"
         code, out, err = run("patch", "aplicar", str(patch_path), "--archivo", str(original), "--salida", str(result))
         self.assertEqual(code, 0, err)

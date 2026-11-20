@@ -106,12 +106,12 @@ class CliTests(TempDirMixin, unittest.TestCase):
         folder = self.folder / "tablas"
         code, out, err = run("export", "--archivo", str(self.file), "--salida", str(folder), "--tipo", "FloatTable")
         self.assertEqual(code, 0, err)
-        self.assertIn("Exportados 1 objetos y 1 tablas CSV", out)
+        self.assertIn("Exportados 1 objeto y 1 tabla CSV", out)
         self.assertEqual(sorted(path.name for path in folder.rglob("*") if path.is_file()),
                          ["char_test.csv", "char_test.json", "manifest.json"])
         code, out, err = run("export", "--archivo", str(self.file), "--salida", str(folder), "--filtro", "death")
         self.assertEqual(code, 0, err)
-        self.assertIn("Exportados 1 objetos y 0 tablas CSV", out)
+        self.assertIn("Exportados 1 objeto y 0 tablas CSV", out)
         code, _out, err = run("export", "--archivo", str(self.file), "--salida", str(self.file.parent))
         self.assertEqual(code, 2)
         self.assertIn("no está vacía", err)

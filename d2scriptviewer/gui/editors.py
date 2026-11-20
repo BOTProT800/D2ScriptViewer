@@ -9,9 +9,10 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
+from .. import i18n, vocabulary
 from ..document import Document
-from ..formats import bod
 from ..formats.obsp import identity_text
+from ..i18n import _, ngettext
 from . import theme
 
 #: Devuelve un mensaje de error para dejar el editor abierto, o ``None`` para cerrarlo.
@@ -116,7 +117,7 @@ class ReferencePicker(tk.Toplevel):
 
     def __init__(self, master: tk.Misc, document: Document, current: tuple[int, int] | None, title: str) -> None:
         super().__init__(master)
-        self.title("Cambiar referencia — D2ScriptViewer")
+        self.title(_("Cambiar referencia — D2ScriptViewer"))
         self.geometry("820x540")
         self.configure(bg=theme.BACKGROUND)
         self.transient(master)
@@ -127,15 +128,15 @@ class ReferencePicker(tk.Toplevel):
 
         current_info = document.object_by_identity(current) if current is not None else None
         if current is None:
-            now = "Ahora es nulo: elige el objeto al que apuntará la referencia nueva."
+            now = _("Ahora es nulo: elige el objeto al que apuntará la referencia nueva.")
         else:
-            current_text = current_info.label() if current_info else "(no existe)"
-            now = f"Ahora apunta a: {current_text}  [{identity_text(*current)}]"
+            current_text = current_info.label() if current_info else _("(no existe)")
+            now = _("Ahora apunta a: {target}  [{identity}]").format(target=current_text, identity=identity_text(*current))
         ttk.Label(self, text=title, style="TLabel", padding=(14, 12, 14, 0), font=("Segoe UI Semibold", 11)).pack(anchor="w")
         ttk.Label(self, text=now, style="Muted.TLabel", padding=(14, 2, 14, 8)).pack(anchor="w")
         top = ttk.Frame(self, padding=(14, 0, 14, 6))
         top.pack(fill="x")
-        ttk.Label(top, text="Filtrar").pack(side="left")
+        ttk.Label(top, text=_("Filtrar")).pack(side="left")
         entry = ttk.Entry(top, textvariable=self.filter_var)
         entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
 
@@ -144,7 +145,7 @@ class ReferencePicker(tk.Toplevel):
             lambda parent: ttk.Treeview(parent, columns=("path", "kind", "identity"), show="headings", selectmode="browse"),
         )
         frame.pack(fill="both", expand=True, padx=14)
-        for column, heading, width in (("path", "Objeto", 380), ("kind", "Tipo", 150), ("identity", "Identidad", 210)):
+        for column, heading, width in (("path", _("Objeto"), 380), ("kind", _("Tipo"), 150), ("identity", _("Identidad"), 210)):
             self.tree.heading(column, text=heading)
             self.tree.column(column, width=width, stretch=column == "path")
         self.tree.bind("<Double-1>", lambda _event: self.accept())
@@ -153,8 +154,8 @@ class ReferencePicker(tk.Toplevel):
         bottom = ttk.Frame(self, padding=(14, 8, 14, 12))
         bottom.pack(fill="x")
         ttk.Label(bottom, textvariable=self.status_var, style="Muted.TLabel").pack(side="left")
-        ttk.Button(bottom, text="Cancelar", command=self.destroy).pack(side="right")
-        ttk.Button(bottom, text="Aceptar", style="Accent.TButton", command=self.accept).pack(side="right", padx=(0, 8))
+        ttk.Button(bottom, text=_("Cancelar"), command=self.destroy).pack(side="right")
+        ttk.Button(bottom, text=_("Aceptar"), style="Accent.TButton", command=self.accept).pack(side="right", padx=(0, 8))
 
         self.bind("<Escape>", lambda _event: self.destroy())
         self.filter_var.trace_add("write", lambda *_: self.refresh())
@@ -183,8 +184,10 @@ class ReferencePicker(tk.Toplevel):
         if children:
             self.tree.selection_set(children[0])
             self.tree.focus(children[0])
-        extra = f" (se muestran {self.LIMIT}; afina el filtro)" if matches > shown else ""
-        self.status_var.set(f"{matches:,} objetos{extra}")
+        text = ngettext("{count:,} objeto", "{count:,} objetos", matches).format(count=matches)
+        if matches > shown:
+            text += " " + _("(se muestran {limit:,}; afina el filtro)").format(limit=self.LIMIT)
+        self.status_var.set(text)
 
     def accept(self) -> None:
         selection = self.tree.selection()
@@ -215,7 +218,7 @@ class FillNullDialog(tk.Toplevel):
         references: int,
     ) -> None:
         super().__init__(master)
-        self.title("Rellenar nulo — D2ScriptViewer")
+        self.title(_("Rellenar nulo — D2ScriptViewer"))
         self.geometry("860x520")
         self.configure(bg=theme.BACKGROUND)
         self.transient(master)
@@ -224,12 +227,14 @@ class FillNullDialog(tk.Toplevel):
         self.rows: dict[str, tuple[int, tuple, str]] = {}
 
         owner, field, role = slot
-        role_text = {"campo": "valor del campo", "elemento": "elemento de la lista", "par": "valor de un par"}.get(role, role)
+        role_text = {"campo": _("valor del campo"), "elemento": _("elemento de la lista"),
+                     "par": _("valor de un par")}.get(role, role)
         ttk.Label(self, text=title, padding=(14, 12, 14, 0), font=("Segoe UI Semibold", 11)).pack(anchor="w")
         ttk.Label(
             self,
-            text=f"Hueco: {owner}.{field} ({role_text}). Se copia un objeto de una clase que ya aparece en este "
-                 "mismo hueco en el archivo; elige un ejemplo y se insertará una copia exacta.",
+            text=_("Hueco: {slot} ({role}). Se copia un objeto de una clase que ya aparece en este mismo hueco en el "
+                   "archivo; elige un ejemplo y se insertará una copia exacta.").format(
+                slot=f"{i18n.text(owner)}.{field}", role=role_text),
             style="Muted.TLabel",
             wraplength=820,
             justify="left",
@@ -241,20 +246,20 @@ class FillNullDialog(tk.Toplevel):
             lambda parent: ttk.Treeview(parent, columns=("where",), show="tree headings", selectmode="browse"),
         )
         frame.pack(fill="both", expand=True, padx=14)
-        self.tree.heading("#0", text="Clase / ejemplo")
-        self.tree.heading("where", text="Propiedad")
+        self.tree.heading("#0", text=_("Clase / ejemplo"))
+        self.tree.heading("where", text=_("Propiedad"))
         self.tree.column("#0", width=380)
         self.tree.column("where", width=420)
         self.tree.tag_configure("class", foreground=theme.HEADING)
         for label, count, examples in classes:
-            parent = self.tree.insert("", "end", text=f"{label}  ({count:,} en el archivo)", open=len(classes) == 1,
-                                      tags=("class",))
+            parent = self.tree.insert("", "end", text=_("{name}  ({count:,} en el archivo)").format(
+                name=i18n.text(label), count=count), open=len(classes) == 1, tags=("class",))
             if examples:
                 self.rows[parent] = (*examples[0], label)
             for position, path in examples:
                 info = document.objects[position]
                 try:
-                    where = bod.path_label(document.baseline_tree(position), path)
+                    where = vocabulary.path_label(document.baseline_tree(position), path)
                 except Exception:  # noqa: BLE001 - un ejemplo ilegible no impide elegir otro
                     continue
                 iid = self.tree.insert(parent, "end", text=info.label(), values=(where,))
@@ -263,17 +268,18 @@ class FillNullDialog(tk.Toplevel):
 
         bottom = ttk.Frame(self, padding=(14, 8, 14, 12))
         bottom.pack(fill="x")
-        message = "" if classes else "En el archivo no hay objetos en este hueco. "
+        parts = [] if classes else [_("En el archivo no hay objetos en este hueco.")]
         if references:
-            message += f"En este hueco hay {references:,} referencias en el archivo."
-        ttk.Label(bottom, text=message, style="Muted.TLabel").pack(side="left")
-        ttk.Button(bottom, text="Cancelar", command=self.destroy).pack(side="right")
+            parts.append(ngettext("En este hueco hay {count:,} referencia en el archivo.",
+                                  "En este hueco hay {count:,} referencias en el archivo.", references).format(count=references))
+        ttk.Label(bottom, text=" ".join(parts), style="Muted.TLabel").pack(side="left")
+        ttk.Button(bottom, text=_("Cancelar"), command=self.destroy).pack(side="right")
         if classes:
-            ttk.Button(bottom, text="Copiar este objeto", style="Accent.TButton", command=self.accept).pack(
+            ttk.Button(bottom, text=_("Copiar este objeto"), style="Accent.TButton", command=self.accept).pack(
                 side="right", padx=(0, 8)
             )
         if references:
-            ttk.Button(bottom, text="Referencia a un objeto…", command=self.choose_reference).pack(
+            ttk.Button(bottom, text=_("Referencia a un objeto…"), command=self.choose_reference).pack(
                 side="right", padx=(0, 8)
             )
         self.bind("<Escape>", lambda _event: self.destroy())

@@ -147,13 +147,13 @@ def prepare_save(document: Document) -> SavePlan:
     report = validate(document)
     if report.errors:
         listed = "\n".join(f"• {error}" for error in report.errors[:20])
-        more = f"\n… y {len(report.errors) - 20} más" if len(report.errors) > 20 else ""
-        raise SaveError(f"No se puede guardar todavía:\n{listed}{more}")
+        more = "\n" + _("… y {count:,} más").format(count=len(report.errors) - 20) if len(report.errors) > 20 else ""
+        raise SaveError(_("No se puede guardar todavía:\n{problems}").format(problems=listed + more))
     modified = {position: document.blob(position) for position in document.modified_positions}
     try:
         data = document.current_data()
     except FormatError as error:
-        raise SaveError(f"No se pudo construir el archivo: {error}") from error
+        raise SaveError(_("No se pudo construir el archivo: {error}").format(error=error)) from error
     return SavePlan(data, sha256(data), document.obsp, modified, list(report.warnings))
 
 
@@ -162,14 +162,15 @@ def verify_plan(plan: SavePlan) -> None:
     try:
         rebuilt = ObspFile.parse(plan.data)
     except FormatError as error:
-        raise SaveError(f"El archivo construido no se puede volver a leer: {error}") from error
+        raise SaveError(_("El archivo construido no se puede volver a leer: {error}").format(error=error)) from error
     source = plan.source
     if len(rebuilt.entries) != len(source.entries):
-        raise SaveError("El archivo construido no tiene el mismo número de objetos")
+        raise SaveError(_("El archivo construido no tiene el mismo número de objetos"))
     if rebuilt.layout_problems():
-        raise SaveError("El archivo construido no tiene los blobs contiguos: " + "; ".join(rebuilt.layout_problems()))
+        raise SaveError(_("El archivo construido no tiene los blobs contiguos: {problems}").format(
+            problems="; ".join(rebuilt.layout_problems())))
     if (rebuilt.header.version, rebuilt.header.unknown) != (source.header.version, source.header.unknown):
-        raise SaveError("La cabecera del archivo construido no conserva versión y campo desconocido")
+        raise SaveError(_("La cabecera del archivo construido no conserva versión y campo desconocido"))
     for position, (old, new) in enumerate(zip(source.entries, rebuilt.entries)):
         same_identity = (
             old.path_hash, old.object_id, old.group, old.kind, old.name_hash, old.folder_hash, old.class_hash,
@@ -177,37 +178,40 @@ def verify_plan(plan: SavePlan) -> None:
             new.path_hash, new.object_id, new.group, new.kind, new.name_hash, new.folder_hash, new.class_hash,
         )
         if not same_identity:
-            raise SaveError(f"El objeto {position} cambió de identidad al construir el archivo")
+            raise SaveError(_("El objeto {position} cambió de identidad al construir el archivo").format(position=position))
         blob = rebuilt.blob(position)
         expected = plan.modified.get(position)
         if expected is None:
             if blob != source.blob(position):
-                raise SaveError(f"El objeto {position} no se editó y sus bytes cambiaron")
+                raise SaveError(_("El objeto {position} no se editó y sus bytes cambiaron").format(position=position))
             continue
         if blob != expected:
-            raise SaveError(f"El objeto {position} no contiene el árbol editado")
+            raise SaveError(_("El objeto {position} no contiene el árbol editado").format(position=position))
         if new.is_script:
             _verify_script(position, source.blob(position), blob)
             continue
         try:
             tree = bod.decode(blob)
             if bod.encode(tree) != blob:
-                raise SaveError(f"El objeto editado {position} no se recodifica igual")
+                raise SaveError(_("El objeto editado {position} no se recodifica igual").format(position=position))
         except FormatError as error:
-            raise SaveError(f"El objeto editado {position} no decodifica: {error}") from error
+            raise SaveError(_("El objeto editado {position} no decodifica: {error}").format(
+                position=position, error=error)) from error
         wrong = first_wrong_name(document_names(tree))
         if wrong is not None:
             raise SaveError(
-                f"El objeto editado {position} tiene la cadena «{wrong.text[:60]}» con un hash que no le "
-                f"corresponde ({wrong.hash:016X}; debería ser {name_hash(wrong.text):016X})"
+                _("El objeto editado {position} tiene la cadena «{text}» con un hash que no le corresponde "
+                  "({hash:016X}; debería ser {expected:016X})").format(
+                    position=position, text=wrong.text[:60], hash=wrong.hash, expected=name_hash(wrong.text))
             )
     for value_hash, text in source.strings.items():
         if rebuilt.strings.get(value_hash, text) != text:
-            raise SaveError("La tabla de cadenas cambió al construir el archivo")
+            raise SaveError(_("La tabla de cadenas cambió al construir el archivo"))
     for value_hash, text in rebuilt.strings.items():
         if name_hash(text) != value_hash:
             raise SaveError(
-                f"La tabla de cadenas tiene «{text[:60]}» con un hash que no le corresponde ({value_hash:016X})"
+                _("La tabla de cadenas tiene «{text}» con un hash que no le corresponde ({hash:016X})").format(
+                    text=text[:60], hash=value_hash)
             )
 
 
@@ -215,11 +219,13 @@ def _verify_script(position: int, original: bytes, blob: bytes) -> None:
     """Un script editado se vuelve a leer igual y solo difiere del original en sus literales."""
     try:
         if script.encode(script.parse(blob)) != blob:
-            raise SaveError(f"El script editado {position} no se recodifica igual")
+            raise SaveError(_("El script editado {position} no se recodifica igual").format(position=position))
         if not script.only_literals_changed(original, blob):
-            raise SaveError(f"En el script editado {position} cambió algo más que literales y valores")
+            raise SaveError(_("En el script editado {position} cambió algo más que literales y valores").format(
+                position=position))
     except FormatError as error:
-        raise SaveError(f"El script editado {position} no se puede volver a leer: {error}") from error
+        raise SaveError(_("El script editado {position} no se puede volver a leer: {error}").format(
+            position=position, error=error)) from error
 
 
 # --- Escritura --------------------------------------------------------------------------------
@@ -235,14 +241,14 @@ def describe_os_error(error: OSError, path: Path) -> str:
         return _locked_message(path)
     if winerror == _ACCESS_DENIED or error.errno in (errno.EACCES, errno.EPERM):
         if path.exists() and not os.access(path, os.W_OK):
-            return f"{path.name} es de solo lectura. Quítale ese atributo o usa «Guardar como»."
-        return (
-            f"No hay permiso para escribir en {path.parent}. Si el juego sigue abierto, ciérralo; "
+            return _("{name} es de solo lectura. Quítale ese atributo o usa «Guardar como».").format(name=path.name)
+        return _(
+            "No hay permiso para escribir en {folder}. Si el juego sigue abierto, ciérralo; "
             "si no, ejecuta la herramienta con permisos suficientes o guarda en otra carpeta."
-        )
+        ).format(folder=path.parent)
     if error.errno == errno.ENOSPC:
-        return f"No queda espacio en el disco de {path.parent}."
-    return f"No se pudo escribir {path}: {error}"
+        return _("No queda espacio en el disco de {folder}.").format(folder=path.parent)
+    return _("No se pudo escribir {path}: {error}").format(path=path, error=error)
 
 
 def _probe_write(path: Path) -> None:
@@ -283,15 +289,15 @@ def check_writable(path: Path) -> None:
     """
     if path.exists():
         if path.is_dir():
-            raise SaveError(f"{path} es una carpeta")
+            raise SaveError(_("{path} es una carpeta").format(path=path))
         if not os.access(path, os.W_OK):
-            raise SaveError(f"{path.name} es de solo lectura. Quítale ese atributo o usa «Guardar como».")
+            raise SaveError(_("{name} es de solo lectura. Quítale ese atributo o usa «Guardar como».").format(name=path.name))
         try:
             _probe_write(path)
         except OSError as error:
             raise SaveError(describe_os_error(error, path)) from error
     elif not path.parent.is_dir():
-        raise SaveError(f"No existe la carpeta {path.parent}")
+        raise SaveError(_("No existe la carpeta {folder}").format(folder=path.parent))
 
 
 def write_atomic(path: Path, data: bytes) -> None:
@@ -326,7 +332,7 @@ def _write_new_file(path: Path, data: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         if path.exists():
-            raise SaveError(f"{path.name} apareció mientras se creaba; no se sobrescribe")
+            raise SaveError(_("{name} apareció mientras se creaba; no se sobrescribe").format(name=path.name))
         os.replace(temporary, path)
     except OSError as error:
         _discard(temporary)
@@ -377,16 +383,17 @@ def ensure_original_copy(path: Path, current: bytes, result: SaveResult) -> None
     _write_new_file(copy, current)
     written = copy.read_bytes()
     if sha256(written) != expected:
-        raise SaveError(f"La copia {copy.name} no coincide con el archivo copiado; no se guarda nada")
+        raise SaveError(_("La copia {copy} no coincide con el archivo copiado; no se guarda nada").format(copy=copy.name))
     try:
         os.chmod(copy, stat.S_IREAD)
     except OSError as error:
-        result.warnings.append(f"No se pudo marcar {copy.name} como solo lectura: {error}")
+        result.warnings.append(_("No se pudo marcar {copy} como solo lectura: {error}").format(copy=copy.name, error=error))
     result.original_created = True
     result.original_is_steam = expected == STEAM_ORIGINAL_SHA256
     if not result.original_is_steam:
         result.warnings.append(
-            f"Aviso: {path.name} ya venía modificado (no es el original de Steam); la copia lo conserva tal cual."
+            _("Aviso: {name} ya venía modificado (no es el original de Steam); la copia lo conserva tal cual.").format(
+                name=path.name)
         )
 
 
@@ -449,7 +456,8 @@ def execute_save(
     """Pasos 2 a 7. Puede correr en un hilo: solo usa ``plan`` y el disco."""
     step = fail_at or (lambda _name: None)
     if is_original_copy(target):
-        raise SaveError(f"No se guarda nunca encima de {target.name}: es la copia del original. Usa «Guardar como».")
+        raise SaveError(_("No se guarda nunca encima de {name}: es la copia del original. Usa «Guardar como».").format(
+            name=target.name))
     verify_plan(plan)
     step("verified")
     check_writable(target)
@@ -466,7 +474,7 @@ def execute_save(
             try:
                 result.backup, result.removed_backups = rotate_backup(target, previous, keep)
             except OSError as error:
-                result.warnings.append(f"No se pudo guardar la copia rotativa: {error}")
+                result.warnings.append(_("No se pudo guardar la copia rotativa: {error}").format(error=error))
         step("backup")
     temporary = tmp_path(target)
     try:
@@ -486,11 +494,12 @@ def execute_save(
     try:
         final = target.read_bytes()
     except OSError as error:
-        raise WrittenMismatchError(f"Se escribió {target.name} pero no se pudo releer: {error}") from error
+        raise WrittenMismatchError(_("Se escribió {name} pero no se pudo releer: {error}").format(
+            name=target.name, error=error)) from error
     if sha256(final) != plan.sha256:
         raise WrittenMismatchError(
-            f"{target.name} no coincide con lo que se quería escribir. "
-            "Restaura el original desde Archivo → Restaurar original."
+            _("{name} no coincide con lo que se quería escribir. "
+              "Restaura el original desde Archivo → Restaurar original.").format(name=target.name)
         )
     return result
 
@@ -506,18 +515,19 @@ class RestoreResult:
 def restore_original(path: Path, *, rotating_backups: bool = True, keep: int = KEEP_BACKUPS) -> RestoreResult:
     """Copia ``X.original.obsp`` encima de ``X.obsp`` con verificación. La copia se conserva."""
     if is_original_copy(path):
-        raise SaveError("Ese archivo ya es la copia del original")
+        raise SaveError(_("Ese archivo ya es la copia del original"))
     copy = original_copy_path(path)
     if not copy.is_file():
-        raise SaveError(f"No existe {copy.name} junto a {path.name}: no hay copia del original que restaurar")
+        raise SaveError(_("No existe {copy} junto a {name}: no hay copia del original que restaurar").format(
+            copy=copy.name, name=path.name))
     try:
         data = copy.read_bytes()
     except OSError as error:
-        raise SaveError(f"No se pudo leer {copy.name}: {error}") from error
+        raise SaveError(_("No se pudo leer {copy}: {error}").format(copy=copy.name, error=error)) from error
     try:
         ObspFile.parse(data)
     except FormatError as error:
-        raise SaveError(f"{copy.name} no es un OBSP válido: {error}") from error
+        raise SaveError(_("{copy} no es un OBSP válido: {error}").format(copy=copy.name, error=error)) from error
     expected = sha256(data)
     check_writable(path)
     backup = None
@@ -530,7 +540,7 @@ def restore_original(path: Path, *, rotating_backups: bool = True, keep: int = K
             backup = None
     write_atomic(path, data)
     if sha256(path.read_bytes()) != expected:
-        raise SaveError(f"{path.name} no quedó idéntico a {copy.name} tras restaurar")
+        raise SaveError(_("{name} no quedó idéntico a {copy} tras restaurar").format(name=path.name, copy=copy.name))
     return RestoreResult(path, expected, expected == STEAM_ORIGINAL_SHA256, backup)
 
 
@@ -544,7 +554,7 @@ def save_document(
     """Construye, guarda y deja el documento al día. Atajo síncrono para la CLI y los tests."""
     destination = target or document.path
     if destination is None:
-        raise D2ScriptViewerError("El documento no tiene ruta: indica dónde guardarlo")
+        raise D2ScriptViewerError(_("El documento no tiene ruta: indica dónde guardarlo"))
     plan = prepare_save(document)
     result = execute_save(plan, destination, rotating_backups=rotating_backups, keep=keep)
     document.mark_saved(plan.data, destination)

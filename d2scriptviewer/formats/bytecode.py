@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from ..binary import TEXT_ENCODING, U32
 from ..errors import FormatError
-from ..i18n import N_
+from ..i18n import N_, _
 from . import bod
 from .bod import Name
 
@@ -122,7 +122,7 @@ def disassemble(code: bytes) -> tuple[int, list[Instruction]]:
     """(número de parámetros, instrucciones). Falla si un opcode es desconocido o el
     código no acaba justo al final de una instrucción."""
     if not code:
-        raise FormatError("Una función vacía no tiene código que desensamblar")
+        raise FormatError(_("Una función vacía no tiene código que desensamblar"))
     instructions: list[Instruction] = []
     end = len(code)
     pos = 1
@@ -132,7 +132,7 @@ def disassemble(code: bytes) -> tuple[int, list[Instruction]]:
             opcode = code[pos]
             info = OPCODES.get(opcode)
             if info is None:
-                raise FormatError(f"Opcode desconocido 0x{opcode:02X} en 0x{start:X}")
+                raise FormatError(_("Opcode desconocido 0x{opcode:02X} en 0x{pos:X}").format(opcode=opcode, pos=start))
             pos += 1
             kind = info.operand
             operand: object = None
@@ -141,7 +141,7 @@ def disassemble(code: bytes) -> tuple[int, list[Instruction]]:
                 text_start = pos + NAME_HEAD.size
                 text_end = text_start + length
                 if code[text_end] != 0:
-                    raise FormatError(f"Nombre sin NUL final en 0x{start:X}")
+                    raise FormatError(_("Nombre sin NUL final en 0x{pos:X}").format(pos=start))
                 operand = Name(value_hash, code[text_start:text_end].decode(TEXT_ENCODING))
                 pos = text_end + 1
             elif kind == INT32:
@@ -157,10 +157,10 @@ def disassemble(code: bytes) -> tuple[int, list[Instruction]]:
                 operand = U32.unpack_from(code, pos)[0]
                 pos += 4
             if pos > end:
-                raise FormatError(f"Instrucción truncada en 0x{start:X}")
+                raise FormatError(_("Instrucción truncada en 0x{pos:X}").format(pos=start))
             instructions.append(Instruction(start, opcode, operand))
     except (IndexError, struct.error):
-        raise FormatError("Código truncado") from None
+        raise FormatError(_("Código truncado")) from None
     _mark_argument_counts(instructions)
     return code[0], instructions
 
@@ -186,7 +186,7 @@ def assemble(params: int, instructions: list[Instruction]) -> bytes:
     for instruction in instructions:
         info = OPCODES.get(instruction.opcode)
         if info is None:
-            raise FormatError(f"Opcode desconocido 0x{instruction.opcode:02X}")
+            raise FormatError(_("Opcode desconocido 0x{opcode:02X}").format(opcode=instruction.opcode))
         out.append(instruction.opcode)
         operand = instruction.operand
         kind = info.operand
@@ -194,14 +194,14 @@ def assemble(params: int, instructions: list[Instruction]) -> bytes:
             assert isinstance(operand, Name)
             raw = operand.text.encode(TEXT_ENCODING)
             if len(raw) > 0xFF:
-                raise FormatError(f"Nombre en línea demasiado largo ({len(raw)} bytes)")
+                raise FormatError(_("Nombre en línea demasiado largo ({count} bytes)").format(count=len(raw)))
             out += NAME_HEAD.pack(len(raw), operand.hash)
             out += raw
             out.append(0)
         elif kind in (INT32, FLOAT32):
             raw = operand.raw  # type: ignore[union-attr]
             if len(raw) != 4:
-                raise FormatError("Un literal numérico ocupa 4 bytes")
+                raise FormatError(_("Un literal numérico ocupa 4 bytes"))
             out += raw
         elif kind == BOOL:
             out.append(operand.raw)  # type: ignore[union-attr]

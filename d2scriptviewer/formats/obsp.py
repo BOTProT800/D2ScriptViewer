@@ -17,7 +17,7 @@ from typing import Mapping, Sequence
 
 from ..binary import TEXT_ENCODING, ByteReader
 from ..errors import FormatError
-from ..i18n import N_, Deferred
+from ..i18n import N_, Deferred, _
 
 MAGIC = b"OBSP"
 HEADER = struct.Struct("<4sBIIIIII")
@@ -103,22 +103,22 @@ class ObspFile:
     @classmethod
     def parse(cls, data: bytes) -> "ObspFile":
         if len(data) < HEADER.size:
-            raise FormatError("El archivo es demasiado corto para ser un OBSP")
+            raise FormatError(_("El archivo es demasiado corto para ser un OBSP"))
         magic, pad, version, unknown, count, strings_end, string_count, max_len = HEADER.unpack_from(data, 0)
         if magic != MAGIC:
-            raise FormatError("No es un archivo OBSP: falta la firma 'OBSP'")
+            raise FormatError(_("No es un archivo OBSP: falta la firma 'OBSP'"))
         header = ObspHeader(version, unknown, count, strings_end, string_count, max_len, pad)
         index_end = strings_end + count * INDEX_ENTRY.size
         if not HEADER.size <= strings_end <= index_end <= len(data):
-            raise FormatError("La cabecera OBSP apunta fuera del archivo")
+            raise FormatError(_("La cabecera OBSP apunta fuera del archivo"))
 
-        reader = ByteReader(data, HEADER.size, strings_end, label="tabla de cadenas")
+        reader = ByteReader(data, HEADER.size, strings_end, label=_("tabla de cadenas"))
         strings: dict[int, str] = {}
         for _index in range(string_count):
             value_hash, length = reader.unpack(STRING_HEAD)
             strings[value_hash] = reader.text(length)
         if reader.remaining():
-            raise FormatError("La tabla de cadenas no termina donde dice la cabecera")
+            raise FormatError(_("La tabla de cadenas no termina donde dice la cabecera"))
 
         entries = []
         size = len(data)
@@ -126,7 +126,7 @@ class ObspFile:
             entry = IndexEntry(*values)
             if entry.offset < index_end or entry.offset + entry.size > size:
                 raise FormatError(
-                    f"El blob del objeto {identity_text(entry.group, entry.object_id)} sale del archivo"
+                    _("El blob del objeto {identity} sale del archivo").format(identity=identity_text(entry.group, entry.object_id))
                 )
             entries.append(entry)
         return cls(data, header, strings, entries)
@@ -156,11 +156,13 @@ class ObspFile:
         cursor = self.index_end
         for position, entry in enumerate(self.entries):
             if entry.offset != cursor:
-                problems.append(f"objeto {position}: offset 0x{entry.offset:x}, se esperaba 0x{cursor:x}")
+                problems.append(_("objeto {position}: offset 0x{offset:x}, se esperaba 0x{expected:x}").format(
+                    position=position, offset=entry.offset, expected=cursor))
                 break
             cursor += entry.size
         if not problems and cursor != len(self.data):
-            problems.append(f"el último blob acaba en 0x{cursor:x} y el archivo en 0x{len(self.data):x}")
+            problems.append(_("el último blob acaba en 0x{end:x} y el archivo en 0x{size:x}").format(
+                end=cursor, size=len(self.data)))
         return problems
 
 
@@ -186,7 +188,7 @@ def build_obsp(
     recalcula. De cada entrada se ignoran ``offset`` y ``size``.
     """
     if len(entries) != len(blobs):
-        raise FormatError("Hay distinto número de entradas que de blobs")
+        raise FormatError(_("Hay distinto número de entradas que de blobs"))
     table = bytearray()
     max_length = 0
     order = string_table_order(entries)
@@ -194,7 +196,7 @@ def build_obsp(
         try:
             raw = strings[value_hash].encode(TEXT_ENCODING)
         except KeyError:
-            raise FormatError(f"Falta la cadena del hash 0x{value_hash:016X}") from None
+            raise FormatError(_("Falta la cadena del hash 0x{hash:016X}").format(hash=value_hash)) from None
         table += STRING_HEAD.pack(value_hash, len(raw))
         table += raw
         max_length = max(max_length, len(raw))
@@ -217,7 +219,7 @@ def build_obsp(
         )
         cursor += len(blob)
     if cursor > 0xFFFFFFFF:
-        raise FormatError("El archivo resultante supera los 4 GiB que admite el índice")
+        raise FormatError(_("El archivo resultante supera los 4 GiB que admite el índice"))
 
     head = HEADER.pack(
         MAGIC,

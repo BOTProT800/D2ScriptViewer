@@ -1,5 +1,59 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 12 implementada (2026-11-19), pendiente de la revisión del inglés.** El usuario aprobó el
+> glosario y la muestra (con *range*, *original backup*, *param* y *Find in Object*). Falta, por
+> decisión del punto 7 de abajo, la documentación en inglés, que se escribe tras su revisión.
+>
+> Criterios de la sección 7, uno por uno:
+>
+> 1. **Módulos:** `i18n.py`, `i18n_en.py` (540 textos y 25 plurales) y `vocabulary.py`, solo con la
+>    biblioteca estándar. El `.spec` y `BUNDLED` no cambian; `MODULES` tiene 32 módulos: sí.
+> 2. **Catálogo** (`CatalogTests`): textos literales, todo traducido con los mismos marcadores, nada
+>    sobrante, sin marcas del español en el inglés y nadie asigna a `_` (se renombraron 12 bucles
+>    `for _ in`): sí. Una clave repetida en el catálogo la detectan `_merge` y un test con `ast`.
+> 3. **Restos estáticos** (`ResidueTests`): sí, con 8 literales canónicos explícitos (claves del
+>    JSON como `tamaño`, la clase de cambio `añadido`, las comillas «» que Ctrl+G quita, «sí» como
+>    bool). Encontró un mensaje de `patches.py` sin traducir.
+> 4. **GUI en inglés** (`EnglishGuiTests`): recorre cada objeto y fila (pista y clic derecho), las
+>    pestañas, la edición y sus avisos, la estructura, la barra de búsqueda, 15 rutas de Ctrl+G que fallan o avisan, la
+>    búsqueda global, Cambios pendientes, los dos diálogos, guardar dos veces, exportar, el parche,
+>    restaurar y «Acerca de»: sí. Encontró dos restos reales («archivo abierto» como base del
+>    parche y el nombre por defecto `cambios.d2svpatch.json`). Comprobado con una mutación: quitar
+>    tres traducciones que el recorrido toca lo hace fallar.
+> 5. **Persistencia** (`InitialLanguageTests`, `LanguageGuiTests`): sí, también el idioma de
+>    Windows simulado con `GetUserDefaultUILanguage`.
+> 6. **Cambio en caliente:** sí. Medido con el archivo real: 72–112 ms con
+>    `death/playercommon_movestates`, `base/itemfoleytable` o `death/death` abiertos. Corregido al
+>    medir: las trazas de las variables retenían desde Tcl los paneles sustituidos, que el
+>    recolector liberaba después desde un hilo de trabajo; ahora se quitan y se recogen en el hilo
+>    de Tk (test `test_old_panels_are_released`).
+> 7. **Parches** y 8. **guardar y exportar** (`*LanguageIndependenceTests`): el mismo parche (salvo
+>    `creado`), el mismo archivo guardado y la misma exportación en los dos idiomas, y un parche de
+>    un idioma se aplica en el otro, con los fixtures y con el archivo real (ediciones de las fases
+>    5 a 7; exportación de unos 850 objetos): sí.
+> 9. **Ctrl+G con el archivo real** (`RealEnglishPathTests`): ida y vuelta de la etiqueta inglesa en
+>    las 1 145 518 filas, con la excepción prevista de `wailing_host`: sí. Corregido al medir: los
+>    alias se calculan una vez, y comprobar la raíz ya no pasa la ruta entera por `fold()`. La ida y
+>    vuelta española tardaba 45,4 s antes de la fase y 48,6 s ahora (+7 %, por las rutas que se
+>    muestran traducidas).
+> 10. **Búsqueda en el objeto en inglés:** compara con los tipos traducidos: sí.
+> 11. **CLI:** sin cambios salvo los plurales en singular («1 objeto, 1 operación»): sí.
+> 12. **Ejecutable:** `dist\D2ScriptViewer.exe` (11,2 MB, PyInstaller 6.22.3) pasa la autoprueba, que
+>     ahora comprueba el catálogo y construye la ventana en los dos idiomas: sí.
+> 13. **Suite:** 307 tests en verde con `D2SV_OBSP`, ninguno omitido: sí.
+> 14. **Documentación:** plan, `CLAUDE.md`, `CHANGELOG.md`, README y `GUIA_MODDER.md`: sí;
+>     `README.en.md` y `GUIA_MODDER.en.md`: pendientes, tras la revisión. `CREDITS.md` no cambia.
+>
+> Detalles decididos al implementar:
+>
+> - `ViewerApp(language=…)`. Sin preferencias (los tests) arranca en español, y cerrar la ventana
+>   devuelve `i18n` al estado de la CLI, así que cada test empieza igual.
+> - `object_tree.group_mode` es el modo canónico: `config.json` sigue guardando `Carpeta`, `Ruta` o
+>   `Tipo`.
+> - Las filas de los scripts con números son `Deferred`, y las descripciones de deshacer llevan la
+>   ruta como `PathText`, así que se leen en el idioma nuevo tras cambiarlo. Las referencias y los
+>   ejemplos de «Rellenar nulo» se construyen en el hilo del índice y también se muestran traducidos.
+> - Se corrigieron los plurales en singular («1 función» en las filas de los scripts).
 > **Fase 12 abierta (2026-11-19): interfaz en inglés, con el idioma seleccionable.** La
 > herramienta va a Nexus Mods, cuyo público habla casi todo inglés. El usuario aprobó estas
 > decisiones:
@@ -928,7 +982,7 @@ Mismo stack y convenciones que Darkstractor:
   `AGENTS.md` aquí viven en `CLAUDE.md`.
 - Tests con `unittest` y CI en Windows con Python 3.10–3.13.
 - Ejecutable con PyInstaller.
-- Interfaz en español con el mismo tema oscuro.
+- Interfaz en español con el mismo tema oscuro; desde la fase 12, también en inglés.
 
 El rendimiento medido basta si se decodifica bajo demanda. Si se prefiere otro stack
 (p. ej. C#/WPF), hay que decidirlo antes de la fase 0.
@@ -1061,6 +1115,9 @@ Tres zonas, con el estilo visual de Darkstractor:
 - **Detalles (derecha/abajo).** Ruta, nombre, clase, carpeta, grupo, id, tipo, offset y tamaño.
   Pestañas: Hex | Referencias ("apunta a" / "usado por") | Script.
 - **Barra de estado.** Estado del archivo (original / modificado), número de cambios pendientes y ruta.
+- **Idioma (fase 12).** Menú «Idioma / Language», antes de Ayuda, con «English» y «Español». El
+  cambio se aplica al momento y se guarda. En inglés, las filas fijas de los scripts y de los
+  pares se ven en inglés (`Functions`, `value`), y Ctrl+G acepta los dos vocabularios.
 - **Acciones.** Abrir (Ctrl+O), Guardar (Ctrl+S), Guardar como, Deshacer/Rehacer (Ctrl+Z / Ctrl+Y),
   Revertir objeto, Cambios pendientes, Restaurar original, Buscar en el objeto (Ctrl+F; F3 y
   Mayús+F3 recorren los resultados), Buscar en todo el archivo (Ctrl+Mayús+F), Ir a la ruta

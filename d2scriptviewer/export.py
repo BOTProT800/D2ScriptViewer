@@ -26,6 +26,7 @@ from .document import Document, ObjectInfo
 from .errors import D2ScriptViewerError
 from .formats import bod, bytecode, script
 from .formats.obsp import STEAM_ORIGINAL_SHA256, kind_name
+from .i18n import _, ngettext
 from .settings import DEFAULT_GAME
 
 MANIFEST = "manifest.json"
@@ -93,7 +94,7 @@ class _Writer:
             return {"tipo": kind, "elementos": items}
         if isinstance(value, bod.BodTuple):
             return {"tipo": "tupla", "elementos": [self.value(item) for item in value.items]}
-        raise D2ScriptViewerError(f"No se sabe exportar un {type(value).__name__}")
+        raise D2ScriptViewerError(_("No se sabe exportar un {kind}").format(kind=type(value).__name__))
 
     def function(self, function: script.Function) -> dict[str, object]:
         if function.params is None:
@@ -181,7 +182,7 @@ def float_table_csv(document: Document, position: int) -> str:
     columns = fields.get("ColumnNames")
     row_names = fields.get("RowNames")
     if not isinstance(rows, bod.BodList):
-        raise D2ScriptViewerError(f"{document.objects[position].path} no tiene la forma de una FloatTable")
+        raise D2ScriptViewerError(_("{path} no tiene la forma de una FloatTable").format(path=document.objects[position].path))
     column_names = [bod.value_text(item) for item in columns.items] if isinstance(columns, bod.BodList) else []
     names = [bod.value_text(item) for item in row_names.items] if isinstance(row_names, bod.BodList) else []
     out = io.StringIO()
@@ -205,9 +206,9 @@ def check_destination(folder: Path) -> None:
     resolved = folder.resolve()
     game = DEFAULT_GAME.resolve()
     if resolved == game or game in resolved.parents:
-        raise D2ScriptViewerError("No se exporta dentro de la carpeta del juego: elige otra carpeta")
+        raise D2ScriptViewerError(_("No se exporta dentro de la carpeta del juego: elige otra carpeta"))
     if resolved.exists() and not resolved.is_dir():
-        raise D2ScriptViewerError(f"{folder} no es una carpeta")
+        raise D2ScriptViewerError(_("{folder} no es una carpeta").format(folder=folder))
     if resolved.is_dir() and any(resolved.iterdir()):
         manifest = resolved / MANIFEST
         try:
@@ -216,7 +217,8 @@ def check_destination(folder: Path) -> None:
             previous = None
         if not isinstance(previous, dict) or previous.get("formato") != EXPORT_FORMAT:
             raise D2ScriptViewerError(
-                f"{folder} no está vacía ni contiene una exportación anterior de D2ScriptViewer: elige una carpeta vacía"
+                _("{folder} no está vacía ni contiene una exportación anterior de D2ScriptViewer: elige una carpeta "
+                  "vacía").format(folder=folder)
             )
 
 
@@ -229,9 +231,11 @@ class ExportResult:
     files: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        return (
-            f"Exportados {self.objects:,} objetos y {self.csv_files:,} tablas CSV en {self.folder} "
-            f"({self.bytes_written / 1e6:,.1f} MB)"
+        return _("Exportados {objects} y {tables} en {folder} ({size:.1f} MB)").format(
+            objects=ngettext("{count:,} objeto", "{count:,} objetos", self.objects).format(count=self.objects),
+            tables=ngettext("{count:,} tabla CSV", "{count:,} tablas CSV", self.csv_files).format(count=self.csv_files),
+            folder=self.folder,
+            size=self.bytes_written / 1e6,
         )
 
 
@@ -266,7 +270,7 @@ def export_document(
     listed = []
     for count, position in enumerate(chosen):
         if cancelled is not None and cancelled():
-            raise D2ScriptViewerError("Exportación cancelada")
+            raise D2ScriptViewerError(_("Exportación cancelada"))
         info = document.objects[position]
         data = object_json(document, position, None if unsaved is None else position in unsaved)
         relative = f"{info.path}.json"

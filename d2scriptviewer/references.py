@@ -15,6 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable
 
+from . import vocabulary
 from .errors import FormatError
 from .formats import bod, script
 from .formats.hashes import HashDictionary, document_names
@@ -41,7 +42,7 @@ class Reference:
 
 def references_in(position: int, document: bod.BodDocument) -> list[Reference]:
     return [
-        Reference(position, path, node.identity, bod.path_label(document, path))
+        Reference(position, path, node.identity, vocabulary.path_text(document, path))
         for path, node in bod.walk(document.root)
         if isinstance(node, bod.ExternalRef)
     ]
@@ -143,10 +144,13 @@ class SlotIndex:
         self._classes: dict[SlotKey, dict[str, list]] = {}
         self._counts: dict[SlotKey, dict[str, int]] = {}
         self._references: dict[SlotKey, int] = {}
+        #: La clase de cada etiqueta, para mostrarla traducida (:func:`.vocabulary.class_text`).
+        self._class_refs: dict[str, bod.ClassRef] = {}
 
     def record(self, key: SlotKey, position: int, path: tuple, node: object) -> None:
         if isinstance(node, bod.BodObject):
             label = node.cls.label()
+            self._class_refs.setdefault(label, node.cls)
             counts = self._counts.setdefault(key, {})
             counts[label] = counts.get(label, 0) + 1
             examples = self._classes.setdefault(key, {}).setdefault(label, [])
@@ -159,7 +163,8 @@ class SlotIndex:
         """(clase, apariciones, ejemplos (posición, ruta)) de más a menos usada."""
         counts = self._counts.get(key, {})
         return sorted(
-            ((label, count, list(self._classes[key][label])) for label, count in counts.items()),
+            ((vocabulary.class_text(self._class_refs[label]), count, list(self._classes[key][label]))
+             for label, count in counts.items()),
             key=lambda row: (-row[1], row[0]),
         )
 

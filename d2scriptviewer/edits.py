@@ -29,12 +29,14 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
+from . import vocabulary
 from .binary import F32, I32, U32
 from .errors import EditError
 from .formats import bod
 from .formats.bod import Name
 from .formats.hashes import HashDictionary, name_hash
 from .formats.obsp import identity_text
+from .i18n import _, ngettext
 
 EDITABLE_TYPES = (bod.Int32, bod.Float32, bod.Bool, bod.RawString, bod.HashedString, bod.ExternalRef)
 INT32_MIN = -(2 ** 31)
@@ -60,7 +62,7 @@ def get_state(node: object) -> State:
         return node.name
     if isinstance(node, bod.ExternalRef):
         return node.identity
-    raise EditError(f"Los valores de tipo {bod.type_text(node)} no se pueden editar todavía")
+    raise EditError(_("Los valores de tipo {type} no se pueden editar todavía").format(type=vocabulary.type_text(node)))
 
 
 def set_state(node: object, state: State) -> None:
@@ -81,7 +83,7 @@ def set_state(node: object, state: State) -> None:
         node.group = group
         node.object_id = object_id
     else:
-        raise EditError(f"Los valores de tipo {bod.type_text(node)} no se pueden editar todavía")
+        raise EditError(_("Los valores de tipo {type} no se pueden editar todavía").format(type=vocabulary.type_text(node)))
 
 
 def state_text(node: object, state: State, ref_label: Callable[[tuple[int, int]], str] | None = None) -> str:
@@ -101,23 +103,25 @@ def parse_int32(text: str) -> bytes:
     """Entero con signo de 32 bits. ``0x…`` se lee como patrón de bits (0 … 0xFFFFFFFF)."""
     value = text.strip().replace("_", "")
     if not value:
-        raise EditError("Escribe un número entero")
+        raise EditError(_("Escribe un número entero"))
     if re.fullmatch(r"[+-]?0[xX][0-9a-fA-F]+", value):
         negative = value.startswith("-")
         number = int(value.lstrip("+-"), 16)
         if negative:
             number = -number
             if number < INT32_MIN:
-                raise EditError(f"{text.strip()} no cabe en un int32")
+                raise EditError(_("{text} no cabe en un int32").format(text=text.strip()))
             return I32.pack(number)
         if number > 0xFFFFFFFF:
-            raise EditError(f"{text.strip()} ocupa más de 32 bits")
+            raise EditError(_("{text} ocupa más de 32 bits").format(text=text.strip()))
         return U32.pack(number)
     if not re.fullmatch(r"[+-]?\d+", value):
-        raise EditError(f"«{text.strip()}» no es un número entero (usa dígitos o 0x seguido de hexadecimal)")
+        raise EditError(_("«{text}» no es un número entero (usa dígitos o 0x seguido de hexadecimal)").format(
+            text=text.strip()))
     number = int(value)
     if not INT32_MIN <= number <= INT32_MAX:
-        raise EditError(f"{number} está fuera del rango de int32 ({INT32_MIN} … {INT32_MAX})")
+        raise EditError(_("{number} está fuera del rango de int32 ({minimum} … {maximum})").format(
+            number=number, minimum=INT32_MIN, maximum=INT32_MAX))
     return I32.pack(number)
 
 
@@ -127,15 +131,16 @@ def parse_float32(text: str) -> bytes:
     if "," in value and "." not in value:
         value = value.replace(",", ".")
     if not value:
-        raise EditError("Escribe un número")
+        raise EditError(_("Escribe un número"))
     if re.search(r"(nan|inf)", value, re.IGNORECASE):
-        raise EditError("No se admiten NaN ni infinitos")
+        raise EditError(_("No se admiten NaN ni infinitos"))
     try:
         number = float(value)
     except ValueError:
-        raise EditError(f"«{text.strip()}» no es un número") from None
+        raise EditError(_("«{text}» no es un número").format(text=text.strip())) from None
     if math.isnan(number) or math.isinf(number) or abs(number) > FLOAT32_MAX:
-        raise EditError(f"{text.strip()} no cabe en un float32 (máximo ±{FLOAT32_MAX:.7g})")
+        raise EditError(_("{text} no cabe en un float32 (máximo ±{maximum:.7g})").format(
+            text=text.strip(), maximum=FLOAT32_MAX))
     return F32.pack(number)
 
 
@@ -149,16 +154,16 @@ def parse_bool(text: str) -> int:
         return 1
     if value in FALSE_WORDS:
         return 0
-    raise EditError("Escribe true o false")
+    raise EditError(_("Escribe true o false"))
 
 
 def parse_raw_string(text: str) -> str:
     if not text.isascii():
-        raise EditError("Solo se admiten caracteres ASCII")
+        raise EditError(_("Solo se admiten caracteres ASCII"))
     if "\x00" in text:
-        raise EditError("La cadena no puede contener el carácter nulo")
+        raise EditError(_("La cadena no puede contener el carácter nulo"))
     if len(text) > MAX_STRING_LENGTH:
-        raise EditError(f"La cadena supera los {MAX_STRING_LENGTH:,} caracteres")
+        raise EditError(_("La cadena supera los {count:,} caracteres").format(count=MAX_STRING_LENGTH))
     return text
 
 
@@ -168,7 +173,7 @@ def parse_name(text: str, dictionary: HashDictionary | None) -> Name:
     Hace falta el diccionario para saber si es nueva y para descartar colisiones.
     """
     if dictionary is None:
-        raise EditError("Aún se está construyendo el diccionario de cadenas; espera unos segundos")
+        raise EditError(_("Aún se está construyendo el diccionario de cadenas; espera unos segundos"))
     name = dictionary.name_for(text)
     if name is not None:
         return name
@@ -177,8 +182,8 @@ def parse_name(text: str, dictionary: HashDictionary | None) -> Name:
     other = dictionary.text(value_hash)
     if other is not None:
         raise EditError(
-            f"«{text}» tiene el mismo hash ({value_hash:016X}) que «{other}», que ya está en el archivo: "
-            "el juego no podría distinguirlas"
+            _("«{text}» tiene el mismo hash ({hash:016X}) que «{other}», que ya está en el archivo: "
+              "el juego no podría distinguirlas").format(text=text, hash=value_hash, other=other)
         )
     return Name(value_hash, text)
 
@@ -192,14 +197,15 @@ def new_name_warning(name: Name, dictionary: HashDictionary | None) -> str | Non
     if not is_new_name(name, dictionary):
         return None
     assert dictionary is not None
-    message = (
-        f"«{name.text}» no aparece en el archivo: es una cadena nueva (hash {name.hash:016X}). "
+    message = _(
+        "«{text}» no aparece en el archivo: es una cadena nueva (hash {hash:016X}). "
         "El juego solo la reconocerá si existe algo con ese nombre, como un recurso o una animación."
-    )
+    ).format(text=name.text, hash=name.hash)
     variants = dictionary.case_variants(name.text)
     if variants:
-        shown = ", ".join(f"«{value}»" for value in variants[:3])
-        message += f" Ojo: en el archivo está {shown}, que solo difiere en mayúsculas, y el hash las distingue."
+        shown = ", ".join(_("«{name}»").format(name=value) for value in variants[:3])
+        message += " " + _("Ojo: en el archivo está {names}, que solo difiere en mayúsculas, y el hash las distingue.").format(
+            names=shown)
     return message
 
 
@@ -215,7 +221,7 @@ def parse_state(node: object, text: str, dictionary: HashDictionary | None = Non
         return parse_raw_string(text)
     if isinstance(node, bod.HashedString):
         return parse_name(text, dictionary)
-    raise EditError(f"Los valores de tipo {bod.type_text(node)} no se editan escribiendo")
+    raise EditError(_("Los valores de tipo {type} no se editan escribiendo").format(type=vocabulary.type_text(node)))
 
 
 def editable_text(node: object) -> str:
@@ -242,16 +248,24 @@ def input_hint(node: object, text: str, dictionary: HashDictionary | None = None
         stored = F32.unpack(state)[0]  # type: ignore[arg-type]
         shown = bod.format_float(stored)
         exact = f"{stored:.9g}"
-        note = "" if shown == exact else f" (exacto {exact})"
-        return True, f"Se guardará como float32 {shown}{note} · hex {state.hex(' ')}"  # type: ignore[union-attr]
+        raw = state.hex(" ")  # type: ignore[union-attr]
+        if shown == exact:
+            return True, _("Se guardará como float32 {value} · hex {raw}").format(value=shown, raw=raw)
+        return True, _("Se guardará como float32 {value} (exacto {exact}) · hex {raw}").format(
+            value=shown, exact=exact, raw=raw)
     if isinstance(node, bod.RawString):
-        return True, f"{len(state):,} caracteres ASCII (antes {len(node.text):,})"  # type: ignore[arg-type]
+        count = len(state)  # type: ignore[arg-type]
+        return True, ngettext("{count:,} carácter ASCII (antes {before:,})", "{count:,} caracteres ASCII (antes {before:,})",
+                              count).format(count=count, before=len(node.text))
     if isinstance(node, bod.HashedString):
         if not is_new_name(state, dictionary):  # type: ignore[arg-type]
-            return True, f"Cadena conocida · hash {state.hash:016X}"  # type: ignore[union-attr]
+            return True, _("Cadena conocida · hash {hash:016X}").format(hash=state.hash)  # type: ignore[union-attr]
         variants = dictionary.case_variants(state.text) if dictionary else []  # type: ignore[union-attr]
-        note = f" · ojo: existe «{variants[0]}»" if variants else ""
-        return True, f"Cadena nueva, no aparece en el archivo · hash {state.hash:016X}{note}"  # type: ignore[union-attr]
+        if variants:
+            return True, _("Cadena nueva, no aparece en el archivo · hash {hash:016X} · ojo: existe «{other}»").format(
+                hash=state.hash, other=variants[0])  # type: ignore[union-attr]
+        return True, _("Cadena nueva, no aparece en el archivo · hash {hash:016X}").format(
+            hash=state.hash)  # type: ignore[union-attr]
     return True, ""
 
 
@@ -272,15 +286,15 @@ def identifier_warning(field: str, node: object) -> str | None:
     """Aviso si la propiedad parece un identificador o un hash (cambiarla puede romper enlaces)."""
     reasons = []
     if field == "ID" or field.endswith("ID") or field.endswith("Id") or "Hash" in field:
-        reasons.append(f"el campo se llama «{field}»")
+        reasons.append(_("el campo se llama «{field}»").format(field=field))
     if isinstance(node, bod.Int32) and abs(node.value) >= HASH_LIKE_THRESHOLD:
-        reasons.append(f"el valor actual ({node.value}, 0x{U32.unpack(node.raw)[0]:08X}) parece un hash")
+        reasons.append(_("el valor actual ({value}, 0x{raw:08X}) parece un hash").format(
+            value=node.value, raw=U32.unpack(node.raw)[0]))
     if not reasons:
         return None
-    return (
-        "Esta propiedad parece un identificador: " + " y ".join(reasons)
-        + ". Cambiarla puede romper enlaces que el juego resuelve por ese valor."
-    )
+    joined = reasons[0] if len(reasons) == 1 else _("{first} y {second}").format(first=reasons[0], second=reasons[1])
+    return _("Esta propiedad parece un identificador: {reasons}. Cambiarla puede romper enlaces que el juego "
+             "resuelve por ese valor.").format(reasons=joined)
 
 
 def field_name(document: bod.BodDocument, path: tuple) -> str:
@@ -320,7 +334,7 @@ class ValueEdit:
 def _items_of(tree: bod.BodDocument, container_path: tuple) -> list:
     container = bod.resolve(tree, container_path)
     if not isinstance(container, (bod.BodList, bod.BodMap)):
-        raise EditError("Solo las listas y los mapas admiten añadir, quitar o mover elementos")
+        raise EditError(_("Solo las listas y los mapas admiten añadir, quitar o mover elementos"))
     return container.items
 
 

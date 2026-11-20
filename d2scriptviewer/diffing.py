@@ -14,9 +14,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from . import edits
+from . import edits, vocabulary
 from .formats import bod
 from .formats.obsp import identity_text
+from .i18n import N_, _, ngettext
 
 #: Por encima de este producto de longitudes, una lista cambiada se resume en una sola línea.
 LCS_LIMIT = 250_000
@@ -27,7 +28,7 @@ RefLabel = Callable[[tuple[int, int]], str]
 @dataclass(frozen=True)
 class Change:
     kind: str
-    """``valor``, ``reemplazado``, ``añadido``, ``eliminado``, ``movido`` o ``lista``."""
+    """``valor``, ``reemplazado``, ``añadido``, ``eliminado``, ``movido`` o ``lista`` (:data:`KINDS`)."""
     path: tuple
     """Ruta en el árbol actual (para ``eliminado`` y ``lista``, la del contenedor)."""
     label: str
@@ -37,17 +38,25 @@ class Change:
     """Estado original de una hoja (solo en ``valor``): permite revertir esa propiedad."""
 
 
+#: Las clases de cambio: identificadores canónicos que «Cambios pendientes» muestra traducidos.
+KINDS = (
+    N_("valor", "cambio"), N_("reemplazado", "cambio"), N_("añadido", "cambio"),
+    N_("eliminado", "cambio"), N_("movido", "cambio"), N_("lista", "cambio"),
+)
+
+
 def describe(node: object, ref_label: RefLabel | None = None) -> str:
+    """Un valor en «Cambios pendientes», en el idioma de la interfaz."""
     if isinstance(node, bod.BodObject):
-        return f"objeto {node.cls.label()}"
+        return _("objeto {name}").format(name=vocabulary.class_label(node.cls))
     if isinstance(node, bod.ExternalRef):
         target = ref_label(node.identity) if ref_label else identity_text(*node.identity)
         return f"→ {target}"
     if isinstance(node, bod.Pair):
         return f"{describe(node.key, ref_label)} → {describe(node.value, ref_label)}"
     if isinstance(node, (bod.BodList, bod.BodMap, bod.BodTuple)):
-        return f"{bod.type_text(node)} de {bod.value_text(node)}"
-    return bod.value_text(node)
+        return _("{type} de {value}").format(type=vocabulary.type_text(node), value=vocabulary.value_text(node))
+    return vocabulary.value_text(node)
 
 
 _LEAVES = (bod.Int32, bod.Float32, bod.Bool, bod.RawString, bod.HashedString, bod.ExternalRef)
@@ -62,7 +71,7 @@ class _Differ:
         self.mapping: dict[tuple, tuple] = {}
 
     def label(self, path: tuple) -> str:
-        return bod.path_label(self.current, path)
+        return vocabulary.path_label(self.current, path)
 
     def add(self, kind: str, path: tuple, before: str, after: str, label: str | None = None,
             original_state: object = None) -> None:
@@ -113,10 +122,11 @@ class _Differ:
     def sequence(self, old_items: list, new_items: list, path: tuple, old_path: tuple) -> None:
         alignment = align(old_items, new_items)
         if alignment is None:
-            self.add("lista", path, f"{len(old_items)} elementos", f"{len(new_items)} elementos")
+            self.add("lista", path, _count(len(old_items)), _count(len(new_items)))
             return
         for source, index in alignment.moved:
-            self.add("movido", path + (index,), f"posición [{source}]", f"posición [{index}]")
+            self.add("movido", path + (index,), _("posición [{index}]").format(index=source),
+                     _("posición [{index}]").format(index=index))
         for source, index in alignment.modified:
             self.compare(old_items[source], new_items[index], path + (index,), old_path + (source,))
         for index in alignment.added:
@@ -124,7 +134,11 @@ class _Differ:
         container = self.label(path)
         for index in alignment.removed:
             self.add("eliminado", path, describe(old_items[index], self.ref_label), "—",
-                     label=f"{container}[{index}] (posición original)")
+                     label=_("{container}[{index}] (posición original)").format(container=container, index=index))
+
+
+def _count(size: int) -> str:
+    return ngettext("{count:,} elemento", "{count:,} elementos", size).format(count=size)
 
 
 @dataclass

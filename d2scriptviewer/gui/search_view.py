@@ -12,6 +12,7 @@ from tkinter import ttk
 from typing import Callable
 
 from ..document import Document
+from ..i18n import _, ngettext, term
 from ..search import SearchHit, SearchOptions, search
 from . import theme
 
@@ -21,7 +22,7 @@ Navigate = Callable[[int, "tuple | None"], None]
 class SearchWindow(tk.Toplevel):
     def __init__(self, master: tk.Misc, document: Document, on_navigate: Navigate) -> None:
         super().__init__(master)
-        self.title("Buscar — D2ScriptViewer")
+        self.title(_("Buscar — D2ScriptViewer"))
         self.geometry("900x560")
         self.configure(bg=theme.BACKGROUND)
         self.transient(master)
@@ -36,23 +37,23 @@ class SearchWindow(tk.Toplevel):
         self.metadata_var = tk.BooleanVar(value=True)
         self.values_var = tk.BooleanVar(value=True)
         self.fields_var = tk.BooleanVar(value=False)
-        self.status_var = tk.StringVar(value="Escribe un texto o un número y pulsa Intro.")
+        self.status_var = tk.StringVar(value=_("Escribe un texto o un número y pulsa Intro."))
 
         top = ttk.Frame(self, padding=(14, 12, 14, 6))
         top.pack(fill="x")
         entry = ttk.Entry(top, textvariable=self.query_var)
         entry.pack(side="left", fill="x", expand=True)
         entry.bind("<Return>", lambda _event: self.start())
-        self.search_button = ttk.Button(top, text="Buscar", style="Accent.TButton", command=self.start)
+        self.search_button = ttk.Button(top, text=_("Buscar"), style="Accent.TButton", command=self.start)
         self.search_button.pack(side="left", padx=(8, 0))
-        self.cancel_button = ttk.Button(top, text="Cancelar", command=self.cancel, state="disabled")
+        self.cancel_button = ttk.Button(top, text=_("Cancelar"), command=self.cancel, state="disabled")
         self.cancel_button.pack(side="left", padx=(8, 0))
 
         options = ttk.Frame(self, padding=(14, 0, 14, 6))
         options.pack(fill="x")
-        ttk.Checkbutton(options, text="Rutas, nombres, carpetas y clases", variable=self.metadata_var).pack(side="left")
-        ttk.Checkbutton(options, text="Valores y símbolos", variable=self.values_var).pack(side="left", padx=(12, 0))
-        ttk.Checkbutton(options, text="Nombres de campo", variable=self.fields_var).pack(side="left", padx=(12, 0))
+        ttk.Checkbutton(options, text=_("Rutas, nombres, carpetas y clases"), variable=self.metadata_var).pack(side="left")
+        ttk.Checkbutton(options, text=_("Valores y símbolos"), variable=self.values_var).pack(side="left", padx=(12, 0))
+        ttk.Checkbutton(options, text=_("Nombres de campo"), variable=self.fields_var).pack(side="left", padx=(12, 0))
 
         frame, self.tree = theme.scrolled(
             self,
@@ -62,10 +63,10 @@ class SearchWindow(tk.Toplevel):
         )
         frame.pack(fill="both", expand=True, padx=14)
         for column, title, width in (
-            ("object", "Objeto", 260),
-            ("where", "Dónde", 80),
-            ("property", "Propiedad", 230),
-            ("value", "Coincidencia", 260),
+            ("object", _("Objeto"), 260),
+            ("where", _("Dónde"), 80),
+            ("property", _("Propiedad"), 230),
+            ("value", _("Coincidencia"), 260),
         ):
             self.tree.heading(column, text=title)
             self.tree.column(column, width=width, stretch=column != "where")
@@ -91,7 +92,7 @@ class SearchWindow(tk.Toplevel):
         )
         self.tree.delete(*self.tree.get_children())
         self.hits = {}
-        self.status_var.set(f"Buscando «{text}»…")
+        self.status_var.set(_("Buscando «{text}»…").format(text=text))
         self.search_button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
 
@@ -129,17 +130,23 @@ class SearchWindow(tk.Toplevel):
                 if kind == "hits":
                     for hit in payload:  # type: ignore[union-attr]
                         info = self.document.objects[hit.position]
-                        iid = self.tree.insert("", "end", values=(info.label(), hit.where, hit.label, hit.text))
+                        values = (info.label(), term(hit.where, "coincidencia"), hit.label, hit.text)
+                        iid = self.tree.insert("", "end", values=values)
                         self.hits[iid] = hit
-                    self.status_var.set(f"{len(self.hits):,} resultados…")
+                    found = len(self.hits)
+                    self.status_var.set(ngettext("{count:,} resultado…", "{count:,} resultados…", found).format(count=found))
                 elif kind == "done":
                     count, truncated, cancelled = payload  # type: ignore[misc]
-                    suffix = " (búsqueda cancelada)" if cancelled else " (límite alcanzado; afina la búsqueda)" if truncated else ""
-                    self.status_var.set(f"{count:,} resultados{suffix}. Doble clic para ir al objeto.")
+                    results = ngettext("{count:,} resultado", "{count:,} resultados", count).format(count=count)
+                    if cancelled:
+                        results += " " + _("(búsqueda cancelada)")
+                    elif truncated:
+                        results += " " + _("(límite alcanzado; afina la búsqueda)")
+                    self.status_var.set(_("{results}. Doble clic para ir al objeto.").format(results=results))
                     self.search_button.configure(state="normal")
                     self.cancel_button.configure(state="disabled")
                 elif kind == "error":
-                    self.status_var.set(f"Error: {payload}")
+                    self.status_var.set(_("Error: {error}").format(error=payload))
                     self.search_button.configure(state="normal")
                     self.cancel_button.configure(state="disabled")
         except queue.Empty:

@@ -8,6 +8,7 @@ from __future__ import annotations
 import struct
 
 from .errors import FormatError
+from .i18n import _
 
 U8 = struct.Struct("<B")
 U16 = struct.Struct("<H")
@@ -26,13 +27,14 @@ class ByteReader:
 
     __slots__ = ("data", "pos", "end", "label")
 
-    def __init__(self, data: bytes, pos: int = 0, end: int | None = None, *, label: str = "datos") -> None:
+    def __init__(self, data: bytes, pos: int = 0, end: int | None = None, *, label: str | None = None) -> None:
         self.data = data
         self.pos = pos
         self.end = len(data) if end is None else end
+        label = _("datos") if label is None else label
         self.label = label
         if not 0 <= pos <= self.end <= len(data):
-            raise FormatError(f"Rango inválido en {label}")
+            raise FormatError(_("Rango inválido en {label}").format(label=label))
 
     def remaining(self) -> int:
         return self.end - self.pos
@@ -41,7 +43,8 @@ class ByteReader:
         start = self.pos
         if count < 0 or start + count > self.end:
             raise FormatError(
-                f"Lectura fuera de rango en {self.label}: 0x{start:x} + {count} > 0x{self.end:x}"
+                _("Lectura fuera de rango en {label}: 0x{start:x} + {count} > 0x{end:x}").format(
+                    label=self.label, start=start, count=count, end=self.end)
             )
         self.pos = start + count
         return start

@@ -32,7 +32,6 @@ from ..formats.obsp import identity_text
 from ..i18n import _, ngettext
 from ..references import Cancelled, FileIndexes, build_indexes, references_in, slot_key
 from ..settings import DEFAULT_GAME, find_default_obsp, load_settings, save_settings
-from ..wording import count as count_text
 from . import theme
 from .details import DetailsPanel
 from .editors import FillNullDialog, ReferencePicker
@@ -354,7 +353,7 @@ class ViewerApp(tk.Tk):
             return True
         target = document.path
         if target is None or saving.is_original_copy(target):
-            self.inform(APP_NAME, "Este archivo es la copia del original: guarda los cambios con «Guardar como».")
+            self.inform(APP_NAME, _("Este archivo es la copia del original: guarda los cambios con «Guardar como»."))
             return False
         self._start_save(target, then=then)
         return False
@@ -365,15 +364,15 @@ class ViewerApp(tk.Tk):
         current = self.document.path if self.document and self.document.path else None
         selected = filedialog.askopenfilename(
             parent=self,
-            title="Abrir scripts.obsp",
+            title=_("Abrir scripts.obsp"),
             initialdir=str(current.parent) if current else None,
-            filetypes=[("Scripts de Darksiders II", "*.obsp"), ("Todos los archivos", "*.*")],
+            filetypes=[(_("Scripts de Darksiders II"), "*.obsp"), (_("Todos los archivos"), "*.*")],
         )
         if selected:
             self.open_file(Path(selected))
 
     def open_file(self, path: Path) -> None:
-        self.status_var.set(f"Abriendo {path.name}…")
+        self.status_var.set(_("Abriendo {name}…").format(name=path.name))
         self.progress.configure(mode="indeterminate")
         self.progress.start(15)
 
@@ -389,7 +388,7 @@ class ViewerApp(tk.Tk):
         self.progress.stop()
         self.progress.configure(mode="determinate", value=0)
         if isinstance(payload, BaseException):
-            self.status_var.set("No se pudo abrir el archivo")
+            self.status_var.set(_("No se pudo abrir el archivo"))
             message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
             messagebox.showerror(APP_NAME, _("No se pudo abrir el archivo.\n\n{message}").format(message=message),
                                  parent=self)
@@ -397,7 +396,8 @@ class ViewerApp(tk.Tk):
         document, removed_tmp = payload  # type: ignore[misc]
         self.set_document(document)
         if removed_tmp:
-            self.status_var.set(f"Se borró {saving.tmp_path(document.path).name}, resto de un guardado interrumpido")
+            self.status_var.set(_("Se borró {name}, resto de un guardado interrumpido").format(
+                name=saving.tmp_path(document.path).name))
 
     def set_document(self, document: Document) -> None:
         self.index_cancel.set()
@@ -479,17 +479,19 @@ class ViewerApp(tk.Tk):
             return
         self.progress.configure(value=0)
         if isinstance(payload, BaseException):
-            self.status_var.set(f"No se pudo indexar: {payload}")
+            self.status_var.set(_("No se pudo indexar: {error}").format(error=payload))
             return
         assert isinstance(payload, FileIndexes)
         self.indexes = payload
         self.on_indexes_ready()
         self.details.set_indexes(payload)
-        failures = f", {len(payload.failures)} objetos no decodifican" if payload.failures else ""
-        self.status_var.set(
-            f"Índice listo: {len(payload.references):,} referencias, "
-            f"{len(payload.dictionary):,} cadenas conocidas{failures}"
-        )
+        status = _("Índice listo: {references:,} referencias, {strings:,} cadenas conocidas").format(
+            references=len(payload.references), strings=len(payload.dictionary))
+        if payload.failures:
+            failed = len(payload.failures)
+            status += ", " + ngettext("{count:,} objeto no decodifica", "{count:,} objetos no decodifican", failed).format(
+                count=failed)
+        self.status_var.set(status)
 
     def on_indexes_ready(self) -> None:
         """Gancho para las fases siguientes (autocompletado de cadenas conocidas)."""
@@ -499,13 +501,14 @@ class ViewerApp(tk.Tk):
     def ref_label(self, identity: tuple[int, int]) -> str:
         info = self.document.object_by_identity(identity) if self.document else None
         if info is None:
-            return f"(no existe) {identity_text(*identity)}"
+            return _("(no existe) {identity}").format(identity=identity_text(*identity))
         return f"{info.label()}  [{identity_text(*identity)}]"
 
     def follow_reference(self, identity: tuple[int, int]) -> None:
         info = self.document.object_by_identity(identity) if self.document else None
         if info is None:
-            self.status_var.set(f"La referencia {identity_text(*identity)} no apunta a ningún objeto de este archivo")
+            self.status_var.set(_("La referencia {identity} no apunta a ningún objeto de este archivo").format(
+                identity=identity_text(*identity)))
             return
         self.navigate(info.position)
 
@@ -550,7 +553,7 @@ class ViewerApp(tk.Tk):
         if document.cached_bod(position) is not None or info.entry.size <= SYNC_DECODE_LIMIT:
             self._display_bod(position, path)
             return
-        self.property_view.show_message(title, f"Decodificando {theme.human_size(info.entry.size)}…")
+        self.property_view.show_message(title, _("Decodificando {size}…").format(size=theme.human_size(info.entry.size)))
         self.details.show(document, info)
         self._decoding = position
         if isinstance(path, Location):
@@ -567,9 +570,10 @@ class ViewerApp(tk.Tk):
                 return  # el fallo es de un objeto que ya no se muestra
             pending, self._pending_location = self._pending_location, None
             if self.position is not None and self.document is not None:
-                self.property_view.show_message(self._object_title(self.position), f"No se pudo decodificar: {payload}")
+                self.property_view.show_message(self._object_title(self.position),
+                                                _("No se pudo decodificar: {error}").format(error=payload))
                 if pending is not None:
-                    self.property_view.goto_failed("Este objeto no se pudo decodificar: no tiene propiedades a las que ir")
+                    self.property_view.goto_failed(_("Este objeto no se pudo decodificar: no tiene propiedades a las que ir"))
             return
         position, path, _tree = payload  # type: ignore[misc]
         if position == self.position:
@@ -587,10 +591,10 @@ class ViewerApp(tk.Tk):
         try:
             tree = document.bod(position)
         except D2ScriptViewerError as error:
-            self.property_view.show_message(title, f"No se pudo decodificar: {error}")
+            self.property_view.show_message(title, _("No se pudo decodificar: {error}").format(error=error))
             self.details.show(document, info)
             if isinstance(path, Location):
-                self.property_view.goto_failed(f"Este objeto no se pudo decodificar: {error}")
+                self.property_view.goto_failed(_("Este objeto no se pudo decodificar: {error}").format(error=error))
             return
         self.property_view.show_bod(title, tree, document.edited_paths(position))
         if isinstance(path, Location):
@@ -608,26 +612,34 @@ class ViewerApp(tk.Tk):
         tree = document.cached_bod(position)
         if isinstance(tree, script.ScriptTree):
             body = tree.script
-            extra.append(
-                ("Script", f"{count_text(len(body.members), 'miembro')}, "
-                           f"{count_text(len(body.initial_values), 'valor inicial', 'valores iniciales')}, "
-                           f"{count_text(len(body.functions), 'función', 'funciones')}, "
-                           f"{count_text(len(body.states), 'estado')}")
+            parts = (
+                ngettext("{count:,} miembro", "{count:,} miembros", len(body.members)).format(count=len(body.members)),
+                ngettext("{count:,} valor inicial", "{count:,} valores iniciales", len(body.initial_values)).format(
+                    count=len(body.initial_values)),
+                ngettext("{count:,} función", "{count:,} funciones", len(body.functions)).format(count=len(body.functions)),
+                ngettext("{count:,} estado", "{count:,} estados", len(body.states)).format(count=len(body.states)),
             )
-            extra.append(("Editables", count_text(len(script.editable_leaves(body)), "literal o valor", "literales o valores")))
+            extra.append((_("Script"), ", ".join(parts)))
+            editable = len(script.editable_leaves(body))
+            extra.append((_("Editables"), ngettext("{count:,} literal o valor", "{count:,} literales o valores",
+                                                   editable).format(count=editable)))
         elif tree is not None:
-            extra.append(("BOD", f"versión {tree.version}, campo desconocido {tree.flags}"))
+            extra.append((_("BOD"), _("versión {version}, campo desconocido {flags}").format(
+                version=tree.version, flags=tree.flags)))
             extra.append(
-                ("Nombres internos",
-                 f"{tree.declared_name_count:,} al abrir (máx. {tree.declared_max_name_length} caracteres)")
+                (_("Nombres internos"),
+                 _("{count:,} al abrir (máx. {length} caracteres)").format(
+                     count=tree.declared_name_count, length=tree.declared_max_name_length))
             )
         if document.is_modified(position):
             changed = len(document.edited_paths(position))
             extra.append(
-                ("Estado", f"modificado: {count_text(changed, 'propiedad', 'propiedades')}, {len(document.blob(position)):,} bytes al guardar")
+                (_("Estado"), ngettext("modificado: {count:,} propiedad, {size:,} bytes al guardar",
+                                      "modificado: {count:,} propiedades, {size:,} bytes al guardar", changed).format(
+                    count=changed, size=len(document.blob(position))))
             )
         else:
-            extra.append(("Estado", "sin cambios"))
+            extra.append((_("Estado"), _("sin cambios")))
         self.details.show(document, info, extra)
 
     def _finish_display(self) -> None:
@@ -650,9 +662,9 @@ class ViewerApp(tk.Tk):
         """Valida y aplica lo escrito en el editor; devuelve el error o ``None``."""
         document, position = self.document, self.position
         if document is None or position is None:
-            return "No hay ningún objeto seleccionado"
+            return _("No hay ningún objeto seleccionado")
         if self.saving:
-            return "Espera a que termine el guardado"
+            return _("Espera a que termine el guardado")
         try:
             state = edits.parse_state(node, text, self.indexes.dictionary if self.indexes else None)
         except EditError as error:
@@ -678,7 +690,7 @@ class ViewerApp(tk.Tk):
         message = "\n\n".join(warning for warning in warnings if warning)
         if not message:
             return True
-        return bool(self.ask(APP_NAME, f"{message}\n\n¿Aplicar el cambio de todos modos?", icon="warning"))
+        return bool(self.ask(APP_NAME, message + "\n\n" + _("¿Aplicar el cambio de todos modos?"), icon="warning"))
 
     def pick_reference(self, node: object, path: tuple) -> None:
         document, position = self.document, self.position
@@ -712,18 +724,18 @@ class ViewerApp(tk.Tk):
             return
         group = self.document.revert_object(position)
         if group is None:
-            self.status_var.set("Ese objeto no tiene cambios")
+            self.status_var.set(_("Ese objeto no tiene cambios"))
             return
         self._after_change(group, reveal=position != self.position)
 
     def _structure_from_menu(self, action: str) -> None:
         selected = self.property_view.selected()
         if selected is None:
-            self.status_var.set("Selecciona antes una propiedad en el panel central")
+            self.status_var.set(_("Selecciona antes una propiedad en el panel central"))
             return
         node, path = selected
         if action not in self.property_view.structure_actions(node, path):
-            self.status_var.set("Esa operación no se puede hacer sobre la propiedad seleccionada")
+            self.status_var.set(_("Esa operación no se puede hacer sobre la propiedad seleccionada"))
             return
         self.structure_action(action, path)
 
@@ -751,14 +763,14 @@ class ViewerApp(tk.Tk):
             self.property_view.set_hint(str(error), "error")
             return
         if group is None:
-            self.status_var.set("El elemento ya está en ese extremo de la lista")
+            self.status_var.set(_("El elemento ya está en ese extremo de la lista"))
             return
         self._after_change(group, reveal=True)
         container = bod.resolve(document.bod(position), path[:-1]) if path else None
         if action == "duplicate" and isinstance(container, (bod.BodMap, bod.BodList)) and container.mode == bod.MODE_PAIRS:
             self.property_view.set_hint(
-                "La copia repite la clave de la entrada original: cámbiala antes de guardar (una clave repetida "
-                "impide guardar).", "warn", hold=True,
+                _("La copia repite la clave de la entrada original: cámbiala antes de guardar (una clave repetida "
+                  "impide guardar)."), "warn", hold=True,
             )
 
     def fill_null(self, path: tuple) -> None:
@@ -766,7 +778,7 @@ class ViewerApp(tk.Tk):
         if document is None or position is None:
             return
         if self.indexes is None:
-            self.status_var.set("Espera a que termine el índice del archivo para rellenar nulos")
+            self.status_var.set(_("Espera a que termine el índice del archivo para rellenar nulos"))
             return
         tree = document.bod(position)
         key = slot_key(tree, path)
@@ -774,8 +786,8 @@ class ViewerApp(tk.Tk):
         references = self.indexes.slots.references(key)
         title = i18n.text(document.full_label(position, path))
         if not classes and not references:
-            self.inform(APP_NAME, f"En el archivo no aparece ningún objeto ni referencia en el hueco "
-                                  f"{key[0]}.{key[1]}, así que no hay de dónde copiar uno con seguridad.")
+            self.inform(APP_NAME, _("En el archivo no aparece ningún objeto ni referencia en el hueco {slot}, así que "
+                                    "no hay de dónde copiar uno con seguridad.").format(slot=f"{key[0]}.{key[1]}"))
             return
         choice = FillNullDialog(self, document, title, key, classes, references).choose()
         if choice is None:
@@ -853,10 +865,12 @@ class ViewerApp(tk.Tk):
         count = document.change_count if document else 0
         if document is not None and count:
             objects = len(document.modified_positions)
-            self.changes_var.set(f"● {count_text(count, 'cambio')} sin guardar en {count_text(objects, 'objeto')}")
+            self.changes_var.set("● " + _("{changes} sin guardar en {objects}").format(
+                changes=ngettext("{count:,} cambio", "{count:,} cambios", count).format(count=count),
+                objects=ngettext("{count:,} objeto", "{count:,} objetos", objects).format(count=objects)))
             self.changes_label.configure(style="StatusWarn.TLabel")
         else:
-            self.changes_var.set("Sin cambios" if document else "")
+            self.changes_var.set(_("Sin cambios") if document else "")
             self.changes_label.configure(style="Status.TLabel")
         undo = document.undo_description if document else None
         redo = document.redo_description if document else None
@@ -912,12 +926,12 @@ class ViewerApp(tk.Tk):
         target = document.path
         if target is None or saving.is_original_copy(target):
             if target is not None:
-                self.inform(APP_NAME, f"{target.name} es la copia del original y nunca se sobrescribe.\n\n"
-                                      "Usa «Guardar como» para guardar los cambios en otro archivo.")
+                self.inform(APP_NAME, _("{name} es la copia del original y nunca se sobrescribe.\n\n"
+                                        "Usa «Guardar como» para guardar los cambios en otro archivo.").format(name=target.name))
             self.save_as()
             return
         if not document.change_count:
-            self.status_var.set("No hay cambios que guardar")
+            self.status_var.set(_("No hay cambios que guardar"))
             return
         self._start_save(target)
 
@@ -928,11 +942,11 @@ class ViewerApp(tk.Tk):
         current = document.path
         selected = filedialog.asksaveasfilename(
             parent=self,
-            title="Guardar como",
+            title=_("Guardar como"),
             defaultextension=".obsp",
             initialdir=str(current.parent) if current else None,
             initialfile=current.name if current and not saving.is_original_copy(current) else "scripts.obsp",
-            filetypes=[("Scripts de Darksiders II", "*.obsp"), ("Todos los archivos", "*.*")],
+            filetypes=[(_("Scripts de Darksiders II"), "*.obsp"), (_("Todos los archivos"), "*.*")],
         )
         if not selected:
             return
@@ -1002,10 +1016,10 @@ class ViewerApp(tk.Tk):
         then, self._after_save = self._after_save, None
         document = self.document
         if isinstance(payload, BaseException):
-            self.status_var.set("No se guardó")
+            self.status_var.set(_("No se guardó"))
             message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
             if isinstance(payload, saving.WrittenMismatchError) and document is not None and document.path:
-                if self.ask(APP_NAME, f"{message}\n\n¿Restaurar ahora la copia del original?", icon="error"):
+                if self.ask(APP_NAME, message + "\n\n" + _("¿Restaurar ahora la copia del original?"), icon="error"):
                     self.restore_original_file(confirm=False)
                 return
             messagebox.showerror(APP_NAME, _("No se guardó el archivo.\n\n{message}").format(message=message), parent=self)
@@ -1036,27 +1050,29 @@ class ViewerApp(tk.Tk):
             return
         path = document.path
         if saving.is_original_copy(path):
-            self.inform(APP_NAME, "Este archivo ya es la copia del original.")
+            self.inform(APP_NAME, _("Este archivo ya es la copia del original."))
             return
         copy = saving.original_copy_path(path)
         if not copy.is_file():
-            self.inform(APP_NAME, f"No existe {copy.name} junto a {path.name}.\n\n"
-                                  "La copia se crea la primera vez que se guarda encima del archivo.")
+            self.inform(APP_NAME, _("No existe {copy} junto a {name}.\n\n"
+                                    "La copia se crea la primera vez que se guarda encima del archivo.").format(
+                copy=copy.name, name=path.name))
             return
         if confirm:
-            lost = (f"\n• Se perderán {count_text(document.change_count, 'cambio')} sin guardar."
-                    if document.change_count else "")
+            changes = document.change_count
+            lost = ("\n" + ngettext("• Se perderá {count:,} cambio sin guardar.", "• Se perderán {count:,} cambios sin guardar.",
+                                    changes).format(count=changes) if changes else "")
             if not self.ask(
                 APP_NAME,
-                f"Se copiará {copy.name} encima de {path.name} y se verificará.\n"
-                f"• {copy.name} se conserva.\n"
-                f"• La versión actual irá a {saving.BACKUP_DIR} si las copias rotativas están activas.{lost}\n\n"
-                "¿Restaurar?",
+                _("Se copiará {copy} encima de {name} y se verificará.\n"
+                  "• {copy} se conserva.\n"
+                  "• La versión actual irá a {folder} si las copias rotativas están activas.{lost}\n\n"
+                  "¿Restaurar?").format(copy=copy.name, name=path.name, folder=saving.BACKUP_DIR, lost=lost),
                 icon="warning",
             ):
                 return
         self.saving = True
-        self.status_var.set(f"Restaurando {path.name}…")
+        self.status_var.set(_("Restaurando {name}…").format(name=path.name))
         rotating = self.rotating_var.get()
         self._spawn("restore", lambda: saving.restore_original(path, rotating_backups=rotating))
 
@@ -1065,13 +1081,16 @@ class ViewerApp(tk.Tk):
             return
         self.saving = False
         if isinstance(payload, BaseException):
-            self.status_var.set("No se restauró")
+            self.status_var.set(_("No se restauró"))
             message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
-            messagebox.showerror(APP_NAME, f"No se restauró el original.\n\n{message}", parent=self)
+            messagebox.showerror(APP_NAME, _("No se restauró el original.\n\n{message}").format(message=message), parent=self)
             return
         assert isinstance(payload, saving.RestoreResult)
-        origin = "el original de Steam" if payload.is_steam else "la copia del original"
-        self.inform(APP_NAME, f"{payload.path.name} vuelve a ser {origin}.\nSHA-256 {payload.sha256}")
+        if payload.is_steam:
+            restored = _("{name} vuelve a ser el original de Steam.\nSHA-256 {sha}")
+        else:
+            restored = _("{name} vuelve a ser la copia del original.\nSHA-256 {sha}")
+        self.inform(APP_NAME, restored.format(name=payload.path.name, sha=payload.sha256))
         self.open_file(payload.path)
 
     # --- Exportar y parches (fase 8) --------------------------------------------------
@@ -1092,7 +1111,7 @@ class ViewerApp(tk.Tk):
         if document is None or self.saving or self.exporting:
             return
         if folder is None:
-            selected = filedialog.askdirectory(parent=self, title="Exportar a JSON y CSV (carpeta vacía)",
+            selected = filedialog.askdirectory(parent=self, title=_("Exportar a JSON y CSV (carpeta vacía)"),
                                                mustexist=False)
             if not selected:
                 return
@@ -1112,7 +1131,7 @@ class ViewerApp(tk.Tk):
             self.messages.put(("export-progress", token, (done, total)))
 
         self.exporting = True
-        self.status_var.set(f"Exportando a {folder}…")
+        self.status_var.set(_("Exportando a {folder}…").format(folder=folder))
         self._spawn("export", lambda: export.export_document(snapshot, folder, progress=progress,
                                                              unsaved=unsaved, source=source))
 
@@ -1128,9 +1147,9 @@ class ViewerApp(tk.Tk):
         self.exporting = False
         self.progress.configure(value=0)
         if isinstance(payload, BaseException):
-            self.status_var.set("No se exportó")
+            self.status_var.set(_("No se exportó"))
             message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
-            self.alert(APP_NAME, f"No se exportó.\n\n{message}")
+            self.alert(APP_NAME, _("No se exportó.\n\n{message}").format(message=message))
             return
         assert isinstance(payload, export.ExportResult)
         self.status_var.set(payload.summary())
@@ -1143,23 +1162,24 @@ class ViewerApp(tk.Tk):
         try:
             base_data, base_label = patches.base_for(document)
         except OSError as error:
-            self.alert(APP_NAME, f"No se pudo leer el original: {error}")
+            self.alert(APP_NAME, _("No se pudo leer el original: {error}").format(error=error))
             return
         snapshot = self._snapshot()
         if snapshot is None:
             return
         if snapshot.obsp.data == base_data:
-            self.inform(APP_NAME, f"No hay diferencias con la base ({base_label}): no hay nada que poner en un parche.")
+            self.inform(APP_NAME, _("No hay diferencias con la base ({base}): no hay nada que poner en un parche.").format(
+                base=base_label))
             return
         if target is None:
             current = document.path
             selected = filedialog.asksaveasfilename(
                 parent=self,
-                title="Exportar parche",
+                title=_("Exportar parche"),
                 defaultextension=patches.PATCH_SUFFIX,
                 initialdir=str(current.parent) if current and not self._in_game_folder(current) else None,
-                initialfile="cambios" + patches.PATCH_SUFFIX,
-                filetypes=[("Parches de D2ScriptViewer", "*" + patches.PATCH_SUFFIX), ("Todos los archivos", "*.*")],
+                initialfile=_("cambios") + patches.PATCH_SUFFIX,
+                filetypes=[(_("Parches de D2ScriptViewer"), "*" + patches.PATCH_SUFFIX), (_("Todos los archivos"), "*.*")],
             )
             if not selected:
                 return
@@ -1172,7 +1192,7 @@ class ViewerApp(tk.Tk):
             return destination, base_label, patch
 
         self.exporting = True
-        self.status_var.set("Creando el parche y comprobándolo sobre la base…")
+        self.status_var.set(_("Creando el parche y comprobándolo sobre la base…"))
         self.progress.configure(mode="indeterminate")
         self.progress.start(15)
         self._spawn("patch", work)
@@ -1184,18 +1204,19 @@ class ViewerApp(tk.Tk):
         self.progress.stop()
         self.progress.configure(mode="determinate", value=0)
         if isinstance(payload, BaseException):
-            self.status_var.set("No se creó el parche")
+            self.status_var.set(_("No se creó el parche"))
             message = str(payload) if isinstance(payload, (D2ScriptViewerError, OSError)) else repr(payload)
-            self.alert(APP_NAME, f"No se creó el parche.\n\n{message}")
+            self.alert(APP_NAME, _("No se creó el parche.\n\n{message}").format(message=message))
             return
         target, base_label, patch = payload  # type: ignore[misc]
-        steam = "original de Steam" if patch["base"]["original_de_steam"] else "no es el original de Steam"
-        self.status_var.set(f"Parche guardado en {target.name}")
+        steam = _("original de Steam") if patch["base"]["original_de_steam"] else _("no es el original de Steam")
+        self.status_var.set(_("Parche guardado en {name}").format(name=target.name))
         self.inform(
             APP_NAME,
-            f"Parche guardado en {target}.\n\n• {patches.patch_summary(patch)}.\n"
-            f"• Base: {base_label} ({steam}).\n"
-            "• Comprobado: reaplicado sobre la base da exactamente el archivo actual.",
+            _("Parche guardado en {path}.\n\n• {summary}.\n"
+              "• Base: {base} ({steam}).\n"
+              "• Comprobado: reaplicado sobre la base da exactamente el archivo actual.").format(
+                path=target, summary=patches.patch_summary(patch), base=base_label, steam=steam),
         )
 
     def apply_patch_file(self, source: Path | None = None) -> None:
@@ -1205,8 +1226,8 @@ class ViewerApp(tk.Tk):
         if source is None:
             selected = filedialog.askopenfilename(
                 parent=self,
-                title="Aplicar parche",
-                filetypes=[("Parches de D2ScriptViewer", "*" + patches.PATCH_SUFFIX), ("Todos los archivos", "*.*")],
+                title=_("Aplicar parche"),
+                filetypes=[(_("Parches de D2ScriptViewer"), "*" + patches.PATCH_SUFFIX), (_("Todos los archivos"), "*.*")],
             )
             if not selected:
                 return
@@ -1215,16 +1236,16 @@ class ViewerApp(tk.Tk):
             patch = patches.load_patch(source)
             group = patches.apply_patch(document, patch, source.name)
         except D2ScriptViewerError as error:
-            self.alert(APP_NAME, f"No se aplicó el parche.\n\n{error}")
+            self.alert(APP_NAME, _("No se aplicó el parche.\n\n{message}").format(message=error))
             return
         if group is None:
-            self.inform(APP_NAME, "El parche no tiene cambios.")
+            self.inform(APP_NAME, _("El parche no tiene cambios."))
             return
         self._after_change(group, reveal=True)
         self.inform(
             APP_NAME,
-            f"Parche aplicado: {patches.patch_summary(patch)}.\n\nSon cambios pendientes: revísalos con Ctrl+P, "
-            "deshazlos todos con Ctrl+Z o guárdalos con Ctrl+S.",
+            _("Parche aplicado: {summary}.\n\nSon cambios pendientes: revísalos con Ctrl+P, "
+              "deshazlos todos con Ctrl+Z o guárdalos con Ctrl+S.").format(summary=patches.patch_summary(patch)),
         )
 
     # --- Búsqueda ------------------------------------------------------------------------
@@ -1273,7 +1294,7 @@ class ViewerApp(tk.Tk):
         Con la barra ya abierta solo vuelve a ella, sin pisar lo escrito.
         """
         if self.document is None:
-            self.status_var.set("Abre antes un scripts.obsp con Archivo → Abrir (Ctrl+O)")
+            self.status_var.set(_("Abre antes un scripts.obsp con Archivo → Abrir (Ctrl+O)"))
             return
         view = self.property_view
         if view.goto_visible:
@@ -1304,7 +1325,7 @@ class ViewerApp(tk.Tk):
             return
         position = self.position if location.position is None else location.position
         if position is None:
-            view.goto_failed("Selecciona antes un objeto, o escribe el objeto delante: objeto · propiedad")
+            view.goto_failed(_("Selecciona antes un objeto, o escribe el objeto delante: objeto · propiedad"))
             return
         if position != self.position:
             self.navigate(position, location)
@@ -1313,7 +1334,7 @@ class ViewerApp(tk.Tk):
         elif self._decoding == position:
             self._pending_location = (position, location)
         else:
-            view.goto_failed("Este objeto no se pudo decodificar: no tiene propiedades a las que ir")
+            view.goto_failed(_("Este objeto no se pudo decodificar: no tiene propiedades a las que ir"))
 
     def cancel_goto(self) -> None:
         """Escape en la barra «Ir a»: un salto que espera a la decodificación ya no se hace."""

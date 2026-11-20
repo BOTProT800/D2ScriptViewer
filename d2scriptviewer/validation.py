@@ -21,10 +21,11 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-from . import diffing, edits
+from . import diffing, edits, vocabulary
 from .document import Document
 from .formats import bod
 from .formats.obsp import identity_text
+from .i18n import _
 
 ID_FIELD = re.compile(r"ID|.*ID|.*Id")
 
@@ -86,8 +87,8 @@ def validate(document: Document) -> ValidationReport:
         for path, node in bod.walk(tree.root):
             if isinstance(node, bod.ExternalRef) and document.object_by_identity(node.identity) is None:
                 report.errors.append(
-                    f"{owner} · {bod.path_label(tree, path)}: la referencia {identity_text(*node.identity)} "
-                    "no apunta a ningún objeto del archivo"
+                    _("{location}: la referencia {identity} no apunta a ningún objeto del archivo").format(
+                        location=f"{owner} · {vocabulary.path_label(tree, path)}", identity=identity_text(*node.identity))
                 )
             elif isinstance(node, (bod.BodMap, bod.BodList)) and node.mode == bod.MODE_PAIRS:
                 keys = Counter(bod.fingerprint(pair.key) for pair in node.items)
@@ -95,8 +96,8 @@ def validate(document: Document) -> ValidationReport:
                 if repeated:
                     shown = ", ".join(sorted({bod.value_text(key) for key in repeated}))
                     report.errors.append(
-                        f"{owner} · {bod.path_label(tree, path)}: claves repetidas ({shown}). "
-                        "Cambia la clave de la entrada duplicada antes de guardar."
+                        _("{location}: claves repetidas ({keys}). Cambia la clave de la entrada duplicada antes de "
+                          "guardar.").format(location=f"{owner} · {vocabulary.path_label(tree, path)}", keys=shown)
                     )
             elif isinstance(node, bod.BodList) and node.mode == bod.MODE_VALUES and len(node.items) > 1:
                 now = _duplicated_ids(node.items)
@@ -113,7 +114,7 @@ def validate(document: Document) -> ValidationReport:
                     if new:
                         shown = ", ".join(sorted(_show(value) for value in new))
                         report.warnings.append(
-                            f"{owner} · {bod.path_label(tree, path)}: el campo {name} se repite ({shown}) "
-                            "y antes no se repetía"
+                            _("{location}: el campo {name} se repite ({values}) y antes no se repetía").format(
+                                location=f"{owner} · {vocabulary.path_label(tree, path)}", name=name, values=shown)
                         )
     return report

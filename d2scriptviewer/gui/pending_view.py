@@ -10,7 +10,7 @@ from tkinter import ttk
 from typing import Callable
 
 from ..document import Document
-from ..wording import count
+from ..i18n import _, ngettext, term
 from . import theme
 
 
@@ -25,7 +25,7 @@ class PendingChangesWindow(tk.Toplevel):
         on_revert_object: Callable[[int], None],
     ) -> None:
         super().__init__(master)
-        self.title("Cambios pendientes — D2ScriptViewer")
+        self.title(_("Cambios pendientes — D2ScriptViewer"))
         self.geometry("980x460")
         self.configure(bg=theme.BACKGROUND)
         self.transient(master)
@@ -44,13 +44,13 @@ class PendingChangesWindow(tk.Toplevel):
             ),
         )
         frame.pack(fill="both", expand=True, padx=14)
-        self.tree.heading("#0", text="Objeto")
+        self.tree.heading("#0", text=_("Objeto"))
         self.tree.column("#0", width=230)
         for column, heading, width in (
-            ("property", "Propiedad", 230),
-            ("kind", "Cambio", 90),
-            ("before", "Antes", 190),
-            ("after", "Después", 190),
+            ("property", _("Propiedad"), 230),
+            ("kind", _("Cambio"), 90),
+            ("before", _("Antes"), 190),
+            ("after", _("Después"), 190),
         ):
             self.tree.heading(column, text=heading)
             self.tree.column(column, width=width, stretch=column != "kind")
@@ -60,9 +60,9 @@ class PendingChangesWindow(tk.Toplevel):
 
         bottom = ttk.Frame(self, padding=(14, 8, 14, 12))
         bottom.pack(fill="x")
-        ttk.Button(bottom, text="Cerrar", command=self.destroy).pack(side="right")
-        ttk.Button(bottom, text="Revertir objeto", command=self._revert).pack(side="right", padx=(0, 8))
-        ttk.Button(bottom, text="Ir", command=self._go).pack(side="right", padx=(0, 8))
+        ttk.Button(bottom, text=_("Cerrar"), command=self.destroy).pack(side="right")
+        ttk.Button(bottom, text=_("Revertir objeto"), command=self._revert).pack(side="right", padx=(0, 8))
+        ttk.Button(bottom, text=_("Ir"), command=self._go).pack(side="right", padx=(0, 8))
         self.bind("<Escape>", lambda _event: self.destroy())
         self.refresh()
 
@@ -77,13 +77,16 @@ class PendingChangesWindow(tk.Toplevel):
                 parents[position] = self.tree.insert("", "end", text=info.label(), open=True, tags=("object",))
                 self.rows[parents[position]] = (position, ())
             iid = self.tree.insert(
-                parents[position], "end", values=(change.label, change.kind, change.before, change.after)
+                parents[position], "end", values=(change.label, term(change.kind, "cambio"), change.before, change.after)
             )
             self.rows[iid] = (position, change.path)
         objects = len(parents)
-        self.summary_var.set(
-            f"{count(len(changes), 'cambio')} en {count(objects, 'objeto')}" if changes else "No hay cambios pendientes."
-        )
+        if changes:
+            self.summary_var.set(_("{changes} en {objects}").format(
+                changes=ngettext("{count:,} cambio", "{count:,} cambios", len(changes)).format(count=len(changes)),
+                objects=ngettext("{count:,} objeto", "{count:,} objetos", objects).format(count=objects)))
+        else:
+            self.summary_var.set(_("No hay cambios pendientes."))
 
     def _selected(self) -> tuple[int, tuple] | None:
         selection = self.tree.selection()

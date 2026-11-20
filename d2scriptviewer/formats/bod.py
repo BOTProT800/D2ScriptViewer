@@ -29,7 +29,7 @@ from typing import Callable, Iterator, NamedTuple, Union
 
 from ..binary import F32, I32, TEXT_ENCODING, U16, U32
 from ..errors import FormatError, PathError
-from ..i18n import N_, variants
+from ..i18n import N_, _, ngettext, variants
 from ..wording import count
 
 MAGIC = b"BOD\xfd"
@@ -310,7 +310,7 @@ class _Decoder:
             index = U32.unpack_from(data, pos + 1)[0]
             self.pos = pos + 5
             if index >= len(self.names):
-                raise FormatError(f"Referencia a un nombre no definido ({index}) en 0x{pos:x}")
+                raise FormatError(_("Referencia a un nombre no definido ({index}) en 0x{pos:x}").format(index=index, pos=pos))
             return self.names[index]
         if marker == NAME_DEFINITION:
             value_hash, length = NAME_HEAD.unpack_from(data, pos + 1)
@@ -319,7 +319,7 @@ class _Decoder:
             name = Name(value_hash, data[start:start + length].decode(TEXT_ENCODING))
             self.names.append(name)
             return name
-        raise FormatError(f"Marca de nombre desconocida 0x{marker:02X} en 0x{pos:x}")
+        raise FormatError(_("Marca de nombre desconocida 0x{marker:02X} en 0x{pos:x}").format(marker=marker, pos=pos))
 
     def class_ref(self) -> ClassRef:
         data = self.data
@@ -332,7 +332,7 @@ class _Decoder:
             group = U32.unpack_from(data, pos + 1)[0]
             self.pos = pos + 5
             return ClassRef(kind, group, self.name())
-        raise FormatError(f"Tipo de clase desconocido 0x{kind:02X} en 0x{pos:x}")
+        raise FormatError(_("Tipo de clase desconocido 0x{kind:02X} en 0x{pos:x}").format(kind=kind, pos=pos))
 
     def fields(self) -> list[Field]:
         count = U32.unpack_from(self.data, self.pos)[0]
@@ -386,7 +386,8 @@ class _Decoder:
                 value = self.value
                 items = [value() for _index in range(count)]
             else:
-                raise FormatError(f"Modo {mode} desconocido en la secuencia 0x{tag:02X} de 0x{pos - 1:x}")
+                raise FormatError(_("Modo {mode} desconocido en la secuencia 0x{tag:02X} de 0x{pos:x}").format(
+                    mode=mode, tag=tag, pos=pos - 1))
             return BodList(mode, items) if tag == TAG_LIST else BodMap(mode, items)
         if tag == TAG_TUPLE:
             count = U32.unpack_from(data, pos)[0]
@@ -400,7 +401,7 @@ class _Decoder:
         if tag == TAG_RAW_STRING:
             marker = data[pos]
             if marker != RAW_STRING_MARKER:
-                raise FormatError(f"Cadena 05 sin la marca 0xFF en 0x{pos:x}")
+                raise FormatError(_("Cadena 05 sin la marca 0xFF en 0x{pos:x}").format(pos=pos))
             length = U16.unpack_from(data, pos + 1)[0]
             start = pos + 3
             self.pos = start + length
@@ -408,22 +409,22 @@ class _Decoder:
         if tag == TAG_NULL:
             self.pos = pos
             return Null()
-        raise FormatError(f"Tag desconocido 0x{tag:02X} en 0x{pos - 1:x}")
+        raise FormatError(_("Tag desconocido 0x{tag:02X} en 0x{pos:x}").format(tag=tag, pos=pos - 1))
 
 
 def decode(data: bytes) -> BodDocument:
     """Decodifica un blob BOD completo; falla si sobran o faltan bytes."""
     if len(data) < HEADER.size or data[:4] != MAGIC:
-        raise FormatError("No es un blob BOD: falta la firma 'BOD\\xFD'")
+        raise FormatError(_("No es un blob BOD: falta la firma 'BOD\\xFD'"))
     _magic, version, flags, name_count, max_name_length = HEADER.unpack_from(data, 0)
     decoder = _Decoder(data, HEADER.size)
     try:
         cls = decoder.class_ref()
         root = BodObject(None, cls, decoder.fields())
     except (IndexError, struct.error):
-        raise FormatError("El blob BOD está truncado") from None
+        raise FormatError(_("El blob BOD está truncado")) from None
     if decoder.pos != len(data):
-        raise FormatError(f"El blob BOD tiene {len(data) - decoder.pos} bytes de más o de menos")
+        raise FormatError(_("El blob BOD tiene {count} bytes de más o de menos").format(count=len(data) - decoder.pos))
     return BodDocument(version, flags, root, name_count, max_name_length)
 
 
@@ -452,7 +453,7 @@ class _Encoder:
             return
         raw = name.text.encode(TEXT_ENCODING)
         if len(raw) > MAX_TEXT_LENGTH:
-            raise FormatError(f"Nombre demasiado largo ({len(raw)} bytes)")
+            raise FormatError(_("Nombre demasiado largo ({count} bytes)").format(count=len(raw)))
         self.names[name] = len(self.names)
         if len(raw) > self.max_length:
             self.max_length = len(raw)
@@ -467,7 +468,7 @@ class _Encoder:
         elif cls.kind == CLASS_NATIVE:
             self.out.append(CLASS_NATIVE)
         else:
-            raise FormatError(f"Tipo de clase desconocido 0x{cls.kind:02X}")
+            raise FormatError(_("Tipo de clase desconocido 0x{kind:02X}").format(kind=cls.kind))
         self.name(cls.name)
 
     def fields(self, fields: list[Field]) -> None:
@@ -483,7 +484,7 @@ class _Encoder:
         kind = type(value)
         if kind is Int32 or kind is Float32:
             if len(value.raw) != 4:  # type: ignore[attr-defined]
-                raise FormatError("Un número BOD ocupa exactamente 4 bytes")
+                raise FormatError(_("Un número BOD ocupa exactamente 4 bytes"))
             out.append(value.tag)
             out += value.raw  # type: ignore[attr-defined]
         elif kind is HashedString:
@@ -511,7 +512,7 @@ class _Encoder:
                 for item in items:
                     self.value(item)
             else:
-                raise FormatError(f"Modo {mode} desconocido en la secuencia 0x{value.tag:02X}")
+                raise FormatError(_("Modo {mode} desconocido en la secuencia 0x{tag:02X}").format(mode=mode, tag=value.tag))
         elif kind is BodTuple:
             items = value.items  # type: ignore[attr-defined]
             out.append(TAG_TUPLE)
@@ -524,7 +525,7 @@ class _Encoder:
         elif kind is RawString:
             raw = value.text.encode(TEXT_ENCODING)  # type: ignore[attr-defined]
             if len(raw) > MAX_TEXT_LENGTH:
-                raise FormatError(f"Cadena demasiado larga ({len(raw)} bytes)")
+                raise FormatError(_("Cadena demasiado larga ({count} bytes)").format(count=len(raw)))
             out.append(TAG_RAW_STRING)
             out.append(RAW_STRING_MARKER)
             out += U16.pack(len(raw))
@@ -532,7 +533,7 @@ class _Encoder:
         elif kind is Null:
             out.append(TAG_NULL)
         else:
-            raise FormatError(f"Valor BOD desconocido: {kind.__name__}")
+            raise FormatError(_("Valor BOD desconocido: {kind}").format(kind=kind.__name__))
 
 
 def encode(document: BodDocument) -> bytes:
@@ -609,7 +610,7 @@ def clone(node: object) -> object:
         return BodTuple([clone(item) for item in node.items])  # type: ignore[attr-defined]
     if kind is Pair:
         return Pair(clone(node.key), clone(node.value))  # type: ignore[attr-defined]
-    raise FormatError(f"No se puede copiar un {kind.__name__}")
+    raise FormatError(_("No se puede copiar un {kind}").format(kind=kind.__name__))
 
 
 def clone_document(document: BodDocument) -> BodDocument:
@@ -639,7 +640,7 @@ def set_slot(parent: object, key: int, value: object) -> None:
         else:
             raise IndexError(key)
     else:
-        raise FormatError(f"Un {type(parent).__name__} no tiene hijos")
+        raise FormatError(_("Un {kind} no tiene hijos").format(kind=type(parent).__name__))
 
 
 # --- Recorrido y presentación -----------------------------------------------------------------
@@ -803,7 +804,8 @@ def parse_path_label(text: str, start: int = 0, end: int | None = None) -> list[
     """
     end = len(text) if end is None else end
     position = _skip_spaces(text, start, end)
-    if fold(text[position:end].rstrip()) in _root_texts():
+    rest = text[position:end].rstrip()
+    if (not rest or rest[0] == "(") and fold(rest) in _root_texts():
         return []
     steps: list[PathStep] = []
     while position < end:
@@ -811,32 +813,33 @@ def parse_path_label(text: str, start: int = 0, end: int | None = None) -> list[
         if char == "[":
             close = text.find("]", position + 1, end)
             if close < 0:
-                raise PathError("Falta el «]» que cierra el índice", position, end)
+                raise PathError(_("Falta el «]» que cierra el índice"), position, end)
             inside = text[position + 1:close].strip()
             if not inside:
-                raise PathError("Falta el número entre los corchetes, como [0]", position, close + 1)
+                raise PathError(_("Falta el número entre los corchetes, como [0]"), position, close + 1)
             if not _DIGITS.fullmatch(inside):
                 raise PathError(
-                    f"Entre corchetes va un número, como [0], y «{inside}» no lo es (los índices por nombre "
-                    "no están disponibles)", position, close + 1,
+                    _("Entre corchetes va un número, como [0], y «{text}» no lo es (los índices por nombre "
+                      "no están disponibles)").format(text=inside), position, close + 1,
                 )
             if len(inside.lstrip("0")) > MAX_INDEX_DIGITS:
-                raise PathError("Ese índice es demasiado grande para cualquier lista", position, close + 1)
+                raise PathError(_("Ese índice es demasiado grande para cualquier lista"), position, close + 1)
             steps.append(PathStep(None, int(inside), position, close + 1))
             position = close + 1
         elif char == "]":
-            raise PathError("Sobra un «]» sin su «[»", position, position + 1)
+            raise PathError(_("Sobra un «]» sin su «[»"), position, position + 1)
         elif char == "." or not steps:
             dot = position if char == "." else None
             name_start = position if dot is None else _skip_spaces(text, position + 1, end)
             name, name_end, position = _read_name(text, name_start, end)
             if not name:
                 if dot is not None:
-                    raise PathError("Falta un nombre de campo tras el «.»", dot, dot + 1)
-                raise PathError(f"Una ruta empieza por un nombre de campo, no por «{char}»", name_start, name_start + 1)
+                    raise PathError(_("Falta un nombre de campo tras el «.»"), dot, dot + 1)
+                raise PathError(_("Una ruta empieza por un nombre de campo, no por «{char}»").format(char=char),
+                                name_start, name_start + 1)
             steps.append(PathStep(name, None, name_start, name_end))
         else:
-            raise PathError(f"Se esperaba «.» o «[» antes de «{char}»", position, position + 1)
+            raise PathError(_("Se esperaba «.» o «[» antes de «{char}»").format(char=char), position, position + 1)
         position = _skip_spaces(text, position, end)
     return steps
 
@@ -850,7 +853,7 @@ class PathNames:
 
     def describe(self, document: BodDocument, path: Path) -> str:
         """El nodo de ``path`` en un mensaje."""
-        return path_label(document, path) if path else "la raíz"
+        return path_label(document, path) if path else _("la raíz")
 
     def field(self, document: BodDocument, parent_path: Path, parent: object, label: str) -> str:
         """Cómo se ve la etiqueta ``label`` de un hijo de ``parent``."""
@@ -869,17 +872,19 @@ CANONICAL_NAMES = PathNames()
 
 def _container_text(node: object) -> str:
     if isinstance(node, BodMap):
-        return "un mapa"
+        return _("un mapa")
     if isinstance(node, BodTuple):
-        return "una tupla"
+        return _("una tupla")
     if isinstance(node, BodList) and node.mode == MODE_PAIRS:
-        return "una lista de pares"
-    return "una lista"
+        return _("una lista de pares")
+    return _("una lista")
 
 
 def _quoted(names: list[str]) -> str:
-    quoted = [f"«{name}»" for name in names]
-    return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " o " + quoted[-1]
+    quoted = [_("«{name}»").format(name=name) for name in names]
+    if len(quoted) == 1:
+        return quoted[0]
+    return _("{names} o {last}").format(names=", ".join(quoted[:-1]), last=quoted[-1])
 
 
 def _close_matches(name: str, candidates: list[str]) -> list[str]:
@@ -910,7 +915,8 @@ def _find_field(
         found = [index for index, label in enumerate(labels) if fold(label) == target]
         spellings = sorted({shown[index] for index in found})
         if len(spellings) > 1:
-            return None, f"«{name}» puede ser {_quoted(spellings)} en {where()}: escríbelo con sus mayúsculas"
+            return None, _("«{name}» puede ser {spellings} en {where}: escríbelo con sus mayúsculas").format(
+                name=name, spellings=_quoted(spellings), where=where())
     if not found and (offset := _OFFSET.fullmatch(name)) is not None:
         value = int(offset.group(1), 16)
         starts = [
@@ -921,14 +927,20 @@ def _find_field(
         found = [index for start, index in starts if start == value]
         if not found and starts:
             before = [labels[index] for start, index in starts if start < value]
-            previous = f": la anterior es {before[-1]}" if before else ""
-            return None, f"«{name}» no es el comienzo de ninguna instrucción de {where()}{previous}"
+            if before:
+                return None, _("«{name}» no es el comienzo de ninguna instrucción de {where}: la anterior es {previous}").format(
+                    name=name, where=where(), previous=before[-1])
+            return None, _("«{name}» no es el comienzo de ninguna instrucción de {where}").format(name=name, where=where())
     if not found:
         similar = _close_matches(name, shown)
-        hint = f". Parecidos: {', '.join(f'«{label}»' for label in similar)}" if similar else ""
-        return None, f"«{name}» no es un campo de {where()}{hint}"
+        if similar:
+            labels_text = ", ".join(_("«{name}»").format(name=label) for label in similar)
+            return None, _("«{name}» no es un campo de {where}. Parecidos: {similar}").format(
+                name=name, where=where(), similar=labels_text)
+        return None, _("«{name}» no es un campo de {where}").format(name=name, where=where())
     if len(found) > 1:
-        return found[0], f"Hay {len(found)} campos «{shown[found[0]]}» en {where()}: se eligió el primero"
+        return found[0], _("Hay {count} campos «{name}» en {where}: se eligió el primero").format(
+            count=len(found), name=shown[found[0]], where=where())
     return found[0], ""
 
 
@@ -950,19 +962,23 @@ def find_path(document: BodDocument, steps: list[PathStep], names: PathNames = C
         message = ""
         if isinstance(node, BodObject):
             if step.name is None:
-                message = f"«{step.text}» no vale aquí: {where()} es un objeto y sus campos van por nombre"
+                message = _("«{step}» no vale aquí: {where} es un objeto y sus campos van por nombre").format(
+                    step=step.text, where=where())
             else:
                 index, message = _find_field(document, path, node, step.name, where, names)
         elif isinstance(node, (BodList, BodMap, BodTuple)):
             size = len(node.items)
             if step.index is None:
-                message = f"«{step.text}» no vale aquí: {where()} es {_container_text(node)} y se esperaba un índice, como [0]"
+                message = _("«{step}» no vale aquí: {where} es {container} y se esperaba un índice, como [0]").format(
+                    step=step.text, where=where(), container=_container_text(node))
             elif step.index < size:
                 index = step.index
             elif size:
-                message = f"«{step.text}» no existe: {where()} tiene {count(size, 'elemento')}, de [0] a [{size - 1}]"
+                message = ngettext("«{step}» no existe: {where} tiene {count:,} elemento, de [0] a [{last}]",
+                                   "«{step}» no existe: {where} tiene {count:,} elementos, de [0] a [{last}]", size).format(
+                    step=step.text, where=where(), count=size, last=size - 1)
             else:
-                message = f"«{step.text}» no existe: {where()} no tiene elementos"
+                message = _("«{step}» no existe: {where} no tiene elementos").format(step=step.text, where=where())
         elif isinstance(node, Pair):
             folded = fold(step.name) if step.name is not None else ""
             canonical = names.alias(document, path, node, step.name) if step.name is not None else None
@@ -972,9 +988,11 @@ def find_path(document: BodDocument, steps: list[PathStep], names: PathNames = C
                 index = PAIR_LABELS.index(canonical)
             else:
                 key, value = (names.field(document, path, node, label) for label in PAIR_LABELS)
-                message = f"«{step.text}» no vale aquí: {where()} es un par y solo tiene .{key} y .{value}"
+                message = _("«{step}» no vale aquí: {where} es un par y solo tiene .{key} y .{value}").format(
+                    step=step.text, where=where(), key=key, value=value)
         else:
-            message = f"«{step.text}» no vale aquí: {where()} es un valor ({names.type(node)}) y no tiene hijos"
+            message = _("«{step}» no vale aquí: {where} es un valor ({type}) y no tiene hijos").format(
+                step=step.text, where=where(), type=names.type(node))
         if index is None:
             return PathMatch(path, step, message)
         if message:

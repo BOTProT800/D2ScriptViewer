@@ -39,6 +39,11 @@ Los menús no tienen letras subrayadas. Las acciones sin atajo están en ellos: 
 Restaurar original…, Exportar a JSON y CSV…, Exportar parche…, Aplicar parche…, y Editar →
 Revertir objeto.
 
+El menú **Idioma / Language** pasa la interfaz al inglés o al español al momento, sin cerrar la
+ventana ni perder los cambios sin guardar, ni lo que se puede deshacer. Recuerda la elección. Se
+cierran la búsqueda en todo el archivo y los cambios pendientes, y el árbol de propiedades queda
+abierto solo hasta la fila seleccionada.
+
 ### Lista de objetos (izquierda)
 
 | Tecla | Acción |
@@ -87,7 +92,9 @@ objeto abierto, también dentro de los nodos y tramos que no has desplegado.
   distinguir mayúsculas. En una referencia, el valor es `→` y el destino: `death_desc` encuentra
   las referencias a `death/death_desc`.
 - **Tipo** es exacto (`int32`, `float32`, `nombre`, `referencia`, `op_3A`…). La lista (↓ o la
-  flecha) trae los tipos del objeto abierto; «(cualquiera)» no filtra.
+  flecha) trae los tipos del objeto abierto; «(cualquiera)» no filtra. En la interfaz inglesa
+  los tipos se ven y se buscan en inglés (`name`, `reference`, `call`…); `int32`, `float32`,
+  `bool` y `op_XX` no cambian.
 - Un campo vacío no filtra, y los que tienen texto se combinan con «y».
 - El contador dice «3 de 7» sobre un resultado, «7 resultados» si la fila seleccionada no es
   uno, y «Sin resultados» si no hay ninguno.
@@ -128,6 +135,15 @@ Ctrl+G abre una barra entre la de búsqueda y el árbol. Escribe o pega una ruta
   tiene la lista o qué se esperaba. Si el objeto no existe, no se mueve nada y se sugieren los
   objetos de nombre parecido.
 - Los índices son números: `MoveStates[Jump]` (por el `Name` del elemento) no está disponible.
+- **En la interfaz inglesa**, las filas fijas de los scripts y los hijos de un par se ven y se
+  copian en inglés. Ctrl+G acepta las dos formas en los dos idiomas, así que las rutas de esta
+  guía valen tal cual. Los nombres del juego (campos, objetos, funciones) no cambian nunca.
+
+  | Español | Inglés |
+  |---|---|
+  | `Versión`, `Símbolos`, `Hash de ruta`, `Grupo`, `Nombre`, `Clase base` | `Version`, `Symbols`, `Path hash`, `Group`, `Name`, `Base class` |
+  | `Miembros`, `Valores iniciales`, `Funciones`, `Estados`, `Parámetros` | `Members`, `Initial values`, `Functions`, `States`, `Parameters` |
+  | `clave`, `valor` (hijos de un par), `(raíz)` | `key`, `value`, `(root)` |
 
 | Tecla | Acción |
 |---|---|

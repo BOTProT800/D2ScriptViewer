@@ -18,6 +18,7 @@ uno del juego.
 
 from __future__ import annotations
 
+import functools
 from typing import Callable
 
 from . import i18n
@@ -76,6 +77,13 @@ def shown_type(canonical: str) -> str:
     """La inversa de :func:`canonical_type`."""
     found = term(canonical, TYPE)
     return found if found != canonical else term(canonical)
+
+
+def class_text(cls: bod.ClassRef) -> str:
+    """La clase como ``str`` canónico (``cls.label()``) que se muestra traducido (índices en un hilo)."""
+    if cls.is_script:
+        return i18n.Deferred("{name} (script, grupo {group})", name=cls.name.text, group=cls.group)
+    return cls.name.text
 
 
 def class_label(cls: bod.ClassRef) -> str:
@@ -168,11 +176,17 @@ class ShownNames(bod.PathNames):
             candidates = script.ROOT_FIELDS if not parent_path else (script.PARAMETERS,)
         else:
             return None
-        folded = bod.fold(name)
-        for canonical in candidates:
-            if any(bod.fold(variant) == folded for variant in i18n.variants(canonical, PATH)):
-                return canonical
-        return None
+        return _aliases(candidates).get(bod.fold(name))
+
+
+@functools.lru_cache(maxsize=None)
+def _aliases(candidates: tuple[str, ...]) -> dict[str, str]:
+    """Cada forma de los términos ``candidates`` en cualquier idioma, sin mayúsculas ni tildes → la canónica."""
+    table: dict[str, str] = {}
+    for canonical in candidates:
+        for variant in i18n.variants(canonical, PATH):
+            table.setdefault(bod.fold(variant), canonical)
+    return table
 
 
 NAMES = ShownNames()

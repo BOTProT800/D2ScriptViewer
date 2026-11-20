@@ -36,15 +36,24 @@ ANY_TYPE = N_("(cualquiera)")
 RefLabel = Callable[[tuple[int, int]], str]
 
 
+#: Dónde coincide un resultado de la búsqueda global; la ventana lo muestra traducido.
+WHERE = (
+    N_("ruta", "coincidencia"), N_("nombre", "coincidencia"), N_("carpeta", "coincidencia"),
+    N_("clase", "coincidencia"), N_("símbolo", "coincidencia"), N_("valor", "coincidencia"),
+    N_("campo", "coincidencia"),
+)
+
+
 @dataclass(frozen=True)
 class SearchHit:
     position: int
     path: tuple | None
     """Ruta de la propiedad; ``None`` si coincide un metadato del índice."""
     where: str
+    """Uno de :data:`WHERE` (canónico)."""
     text: str
     label: str = ""
-    """Ruta legible de la propiedad (vacía en los metadatos)."""
+    """Ruta legible de la propiedad, como se ve en la interfaz (vacía en los metadatos)."""
 
 
 @dataclass(frozen=True)
@@ -110,7 +119,7 @@ def _match_value(query: _Query, node: object) -> str | None:
     elif kind is bod.BodObject and node.index is not None:  # type: ignore[attr-defined]
         # La clase de la raíz ya la cubre el metadato «clase» del índice.
         if query.needle in node.cls.name.text.casefold():  # type: ignore[attr-defined]
-            return node.cls.label()  # type: ignore[attr-defined]
+            return vocabulary.class_label(node.cls)  # type: ignore[attr-defined]
     return None
 
 
@@ -178,7 +187,7 @@ def search(
         for path, node in bod.walk(tree.root):
             matched = _match_value(query, node)
             if matched is not None:
-                hit = SearchHit(info.position, path, "valor", matched, bod.path_label(tree, path))
+                hit = SearchHit(info.position, path, "valor", matched, vocabulary.path_label(tree, path))
                 if emit(hit):
                     flush()
                     return hits, True
@@ -187,7 +196,7 @@ def search(
                     if query.needle in field.name.text.casefold():
                         field_path = path + (index,)
                         hit = SearchHit(info.position, field_path, "campo", field.name.text,
-                                        bod.path_label(tree, field_path))
+                                        vocabulary.path_label(tree, field_path))
                         if emit(hit):
                             flush()
                             return hits, True

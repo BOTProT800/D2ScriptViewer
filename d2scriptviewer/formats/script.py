@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 
 from ..binary import ByteReader, U32
 from ..errors import FormatError
-from ..i18n import N_, Deferred
+from ..i18n import N_, Deferred, _
 from ..wording import count
 from . import bod, bytecode
 from .bod import BodDocument, BodObject, ClassRef, Field, Name, Note
@@ -94,10 +94,10 @@ class ScriptHeader:
 
 
 def parse_header(data: bytes) -> ScriptHeader:
-    reader = ByteReader(data, label="cabecera de script")
+    reader = ByteReader(data, label=_("cabecera de script"))
     version, count, max_length = reader.unpack(HEADER)
     if count > len(data) // SYMBOL_HEAD.size:
-        raise FormatError(f"Número de símbolos imposible: {count}")
+        raise FormatError(_("Número de símbolos imposible: {count}").format(count=count))
     symbols = []
     for _index in range(count):
         value_hash, length = reader.unpack(SYMBOL_HEAD)
@@ -110,16 +110,14 @@ def header_problems(header: ScriptHeader, entry: IndexEntry) -> list[str]:
     """Incoherencias entre la cabecera y su entrada del índice (vacío si todo cuadra)."""
     problems = []
     if header.version != SCRIPT_VERSION:
-        problems.append(f"versión {header.version}, se esperaba {SCRIPT_VERSION}")
+        problems.append(_("versión {version}, se esperaba {expected}").format(version=header.version, expected=SCRIPT_VERSION))
     if header.declared_max_symbol_length != header.max_symbol_length:
-        problems.append(
-            f"longitud máxima declarada {header.declared_max_symbol_length}, "
-            f"real {header.max_symbol_length}"
-        )
+        problems.append(_("longitud máxima declarada {declared}, real {real}").format(
+            declared=header.declared_max_symbol_length, real=header.max_symbol_length))
     if header.path_hash != entry.path_hash:
-        problems.append("el hash de ruta no coincide con el del índice")
+        problems.append(_("el hash de ruta no coincide con el del índice"))
     if header.group != entry.group:
-        problems.append(f"grupo {header.group}, el índice dice {entry.group}")
+        problems.append(_("grupo {group}, el índice dice {expected}").format(group=header.group, expected=entry.group))
     return problems
 
 
@@ -198,7 +196,7 @@ class _Body:
     def name(self, value_hash: int) -> Name:
         name = self.by_hash.get(value_hash)
         if name is None:
-            raise FormatError(f"El hash {value_hash:016X} no está en la tabla de símbolos del script")
+            raise FormatError(_("El hash {hash:016X} no está en la tabla de símbolos del script").format(hash=value_hash))
         return name
 
     def value(self) -> bod.Value:
@@ -206,7 +204,7 @@ class _Body:
         decoder.names = list(self.names)
         value = decoder.value()
         if len(decoder.names) != len(self.names):
-            raise FormatError(f"Un valor del script define un nombre nuevo en 0x{self.pos:X}")
+            raise FormatError(_("Un valor del script define un nombre nuevo en 0x{pos:X}").format(pos=self.pos))
         self.pos = decoder.pos
         return value
 
@@ -217,7 +215,7 @@ class _Body:
             value_hash, size = self.unpack(FUNCTION_HEAD)
             code = self.data[self.pos:self.pos + size]
             if len(code) != size:
-                raise FormatError("El código de una función se sale del blob")
+                raise FormatError(_("El código de una función se sale del blob"))
             self.pos += size
             if size == 0:
                 result.append(Function(self.name(value_hash), None))
@@ -252,9 +250,9 @@ def parse(data: bytes) -> Script:
             members, initial_values, functions, states,
         )
     except (IndexError, struct.error):
-        raise FormatError("El script está truncado") from None
+        raise FormatError(_("El script está truncado")) from None
     if body.pos != len(data):
-        raise FormatError(f"El script tiene {len(data) - body.pos} bytes de más")
+        raise FormatError(_("El script tiene {count} bytes de más").format(count=len(data) - body.pos))
     return script
 
 
@@ -270,7 +268,7 @@ class _ValueEncoder(bod._Encoder):
     def name(self, name: Name) -> None:
         index = self.symbols.get(name)
         if index is None:
-            raise FormatError(f"«{name.text}» no está en la tabla de símbolos del script")
+            raise FormatError(_("«{name}» no está en la tabla de símbolos del script").format(name=name.text))
         self.out.append(bod.NAME_REFERENCE)
         self.out += U32.pack(index)
 
@@ -281,7 +279,7 @@ def encode(script: Script) -> bytes:
 
     def known(name: Name) -> int:
         if name not in symbols:
-            raise FormatError(f"«{name.text}» no está en la tabla de símbolos del script")
+            raise FormatError(_("«{name}» no está en la tabla de símbolos del script").format(name=name.text))
         return name.hash
 
     def value(item: bod.Value) -> bytes:
@@ -303,7 +301,7 @@ def encode(script: Script) -> bytes:
     for member in script.members:
         out += MEMBER_HEAD.pack(known(member.name), member.flags, member.type)
         if (member.default is not None) != bool(member.flags & MEMBER_HAS_DEFAULT):
-            raise FormatError(f"El miembro {member.name.text} no concuerda con sus banderas")
+            raise FormatError(_("El miembro {name} no concuerda con sus banderas").format(name=member.name.text))
         if member.default is not None:
             out += value(member.default)
     out += U32.pack(len(script.initial_values))

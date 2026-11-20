@@ -40,12 +40,17 @@ para la búsqueda global; sus dos tests con el archivo real (`RealTreeSearchTest
 «Copiar ruta de la propiedad» o `objeto · propiedad` y salta a esa fila. Versión 1.1.0
 publicada en GitHub el 19 de noviembre de 2026: fases 10 y 11, pruebas de audio y esquivas. Es la
 primera release; la 1.0.0 nunca se etiquetó. El repositorio es público. El push y las etiquetas
-los decide el usuario; para la 1.1.0 pidió que los hiciera Claude. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+los decide el usuario; para la 1.1.0 pidió que los hiciera Claude. Fase 12 (interfaz en inglés,
+con el idioma seleccionable) implementada el 19 de noviembre de 2026 y pendiente de la revisión
+del inglés por el usuario y de la documentación en inglés; sus decisiones, al principio del plan. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
-El usuario escribe en español. La interfaz, los comentarios y la documentación van en
-español; los identificadores, en inglés (estilo de Darkstractor).
+El usuario escribe en español. La interfaz se usa en español o en inglés (fase 12): cada texto se
+escribe en español dentro de `_()`, `ngettext()` o `N_()` y su traducción va en `i18n_en.py` (lo
+exige `tests/test_i18n.py`). Los comentarios y la documentación interna van en español; los
+identificadores, en inglés (estilo de Darkstractor). La CLI y el informe de la autoprueba siguen
+solo en español.
 
 ## Comandos
 
@@ -128,7 +133,22 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   identidad, SHA), etiqueta, valor anterior y huellas, y aplica todo como un paso de deshacer
   con `Document.run_operations` (si algo falla, no queda nada aplicado).
 - `diffing.align`: alineamiento de listas por huellas, compartido por el comparador y los parches.
-- `wording.py`: plurales («1 objeto», «2 objetos»).
+- `i18n.py` (fase 12): `_()`, `ngettext()`, `pgettext()`, `N_()` (marca un texto de una tabla) y
+  `term()` (la única búsqueda con un texto variable, para lo declarado con `N_`). `_()` devuelve una
+  plantilla cuyo `format` pone el separador de miles del idioma en `{n:,}` (espacio duro en el
+  español de la interfaz). `Deferred` es un `str` con el texto español de siempre que `shown()`
+  vuelve a componer en el idioma activo. `set_language`, `reset` (el estado de la CLI) e
+  `initial_language` (`D2SV_LANG`, `config.json`, idioma de la pantalla de Windows).
+- `i18n_en.py`: el catálogo inglés, `MESSAGES` (texto o `(contexto, texto)`) y `PLURALS`, en
+  secciones por módulo unidas con `_merge`, que rechaza dos traducciones de una clave.
+- `vocabulary.py` (fase 12): **el núcleo nombra en español canónico** (etiquetas de ruta, tipos,
+  mnemónicos, filas de los scripts), porque eso entra en parches, exportaciones y huellas; la
+  interfaz lo traduce al mostrarlo. Columnas del panel (`row_label`, `type_text`, `value_text`),
+  `PathText` (ruta canónica que se muestra traducida: `Document.full_label`, las descripciones de
+  deshacer, las referencias) y `ShownNames`, los mensajes y alias de Ctrl+G para `bod.find_path`.
+  Solo son vocabulario los hijos de un par y, en los scripts, los campos de la raíz
+  (`script.ROOT_FIELDS`) y `Parámetros`.
+- `wording.py`: plurales de la CLI («1 objeto», «2 objetos»); la interfaz usa `ngettext`.
 - `verification.py`: las comprobaciones completas que usa `verify`.
 - `selftest.py`: la autoprueba del ejecutable (`MODULES` debe listar todos los módulos; un test lo
   comprueba). `run_d2scriptviewer.py` es la entrada del `.exe` (siempre GUI, salvo
@@ -136,7 +156,10 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   textos de licencia de terceros y `VERSIONES.txt`) y `THIRD_PARTY_NOTICES.md` los explica.
   `.github/workflows/release.yml` publica la release con una etiqueta `v*`.
 - `gui/`: `app.py` (ventana, hilos, navegación, edición; `go_to_location` resuelve Ctrl+G, también
-  tras decodificar en un hilo, con `_pending_location`), `object_tree.py`, `property_view.py`
+  tras decodificar en un hilo, con `_pending_location`; `change_language` reconstruye menús y
+  paneles en el mismo proceso con `_rebuild_ui`, quita antes las trazas de las variables de los
+  paneles viejos, que si no los retendría Tcl, y los recoge con `gc.collect()` en el hilo de Tk),
+  `object_tree.py` (`group_mode` es el modo canónico que se guarda), `property_view.py`
   (árbol perezoso con tramos de 500, y la barra de búsqueda del objeto: recalcula en `show_bod` y
   `set_edited` sin mover la selección y navega con `reveal`; la barra «Ir a» y la pista retenida,
   `set_hint(..., hold=True)`, que la selección encolada de un salto no pisa),
@@ -221,6 +244,11 @@ encuentran.
   5. Releer el archivo y comparar su SHA-256 con el de memoria.
 
 ## Invariantes que no se pueden romper
+
+- **El idioma nunca cambia un byte** de lo que se guarda, se exporta o se escribe en un parche, ni
+  las huellas: el núcleo usa el vocabulario canónico y solo la interfaz lo traduce. Un parche
+  creado en un idioma se aplica en el otro (`tests/test_i18n.py` lo comprueba, también con el
+  archivo real).
 
 - **Sin pérdidas.** Un objeto no editado conserva sus bytes exactos, y editar y revertir
   devuelve el archivo idéntico. El original mide 18 334 463 bytes y su SHA-256 es

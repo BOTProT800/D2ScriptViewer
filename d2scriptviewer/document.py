@@ -34,7 +34,7 @@ from .errors import EditError, PathError
 from .formats import bod, script
 from .formats.hashes import HashDictionary
 from .formats.obsp import STEAM_ORIGINAL_SHA256, IndexEntry, ObspFile, identity_text, rebuild
-from .i18n import Deferred
+from .i18n import Deferred, _
 
 
 @dataclass(frozen=True)
@@ -97,9 +97,10 @@ def _check_characters(text: str, start: int, end: int) -> None:
     for index in range(start, end):
         char = text[index]
         if char in _LINE_BREAKS:
-            raise PathError("Una ruta ocupa una sola línea", index, index + 1)
+            raise PathError(_("Una ruta ocupa una sola línea"), index, index + 1)
         if not char.isspace() and unicodedata.category(char) in ("Cc", "Cf", "Co", "Cs", "Cn"):
-            raise PathError(f"La ruta lleva un carácter invisible (U+{ord(char):04X}): bórralo", index, index + 1)
+            raise PathError(_("La ruta lleva un carácter invisible (U+{code:04X}): bórralo").format(code=ord(char)),
+                            index, index + 1)
 
 
 def _path_key(text: str) -> str:
@@ -181,7 +182,7 @@ class Document:
         """
         obsp = ObspFile.parse(data)
         if [entry.identity for entry in obsp.entries] != [entry.identity for entry in self.obsp.entries]:
-            raise EditError("El archivo guardado no tiene los mismos objetos que el documento")
+            raise EditError(_("El archivo guardado no tiene los mismos objetos que el documento"))
         self.obsp = obsp
         self.path = path
         self._index_objects()
@@ -289,8 +290,8 @@ class Document:
         node = bod.resolve(self.bod(position), path)
         if self.objects[position].is_script and not isinstance(node, script.EDITABLE_VALUES):
             raise EditError(
-                "En los scripts compilados solo se editan, sin cambiar tamaños, los literales int, float y bool "
-                "y los valores por defecto e iniciales de esos tipos"
+                _("En los scripts compilados solo se editan, sin cambiar tamaños, los literales int, float y bool "
+                  "y los valores por defecto e iniciales de esos tipos")
             )
         return node
 
@@ -322,8 +323,8 @@ class Document:
         start, end = _unwrap(text)
         if start == end:
             raise PathError(
-                "Escribe una ruta, como MoveStates[44].JumpImpulse, o el objeto delante: "
-                "death/playercommon_movestates · MoveStates[44].JumpImpulse"
+                _("Escribe una ruta, como MoveStates[44].JumpImpulse, o el objeto delante: "
+                  "death/playercommon_movestates · MoveStates[44].JumpImpulse")
             )
         _check_characters(text, start, end)
         separator = _find_separator(text, start, end)
@@ -331,8 +332,8 @@ class Document:
             separator_start, separator_end = separator
             object_start, object_end = _strip_span(text, start, separator_start)
             if object_start == object_end:
-                raise PathError(f"Falta el objeto antes de «{text[separator_start:separator_end]}»",
-                                separator_start, separator_end)
+                raise PathError(_("Falta el objeto antes de «{separator}»").format(
+                    separator=text[separator_start:separator_end]), separator_start, separator_end)
             info = self._object_in(text, object_start, object_end)
             return Location(info.position, tuple(bod.parse_path_label(text, separator_end, end)))
         steps = bod.parse_path_label(text, start, end)
@@ -341,7 +342,8 @@ class Document:
             if len(steps) > 1:
                 rest = text[steps[1].start:end].strip()
                 raise PathError(
-                    f"Para ir a una propiedad de otro objeto, sepáralos con « · »: {first.name}{FULL_LABEL_SEPARATOR}{rest}",
+                    _("Para ir a una propiedad de otro objeto, sepáralos con « · »: {location}").format(
+                        location=f"{first.name}{FULL_LABEL_SEPARATOR}{rest}"),
                     first.start, first.end,
                 )
             return Location(self._object_in(text, first.start, first.end).position, ())
@@ -353,8 +355,12 @@ class Document:
             return info
         key = _path_key(text[start:end])
         similar = difflib.get_close_matches(key, list(self._by_path), n=bod.SUGGESTIONS, cutoff=0.6)
-        hint = f". Parecidos: {', '.join(f'«{self._by_path[path].path}»' for path in similar)}" if similar else ""
-        raise PathError(f"No hay ningún objeto «{text[start:end].strip()}»{hint}", start, end)
+        name = text[start:end].strip()
+        if similar:
+            names = ", ".join(_("«{name}»").format(name=self._by_path[path].path) for path in similar)
+            raise PathError(_("No hay ningún objeto «{name}». Parecidos: {similar}").format(name=name, similar=names),
+                            start, end)
+        raise PathError(_("No hay ningún objeto «{name}»").format(name=name), start, end)
 
     def looks_like_location(self, text: str, position: int | None) -> bool:
         """Si ``text`` (el portapapeles) parece una ruta a la que ir desde el objeto ``position``.
@@ -387,7 +393,8 @@ class Document:
         if before == state:
             return None
         if isinstance(node, bod.ExternalRef) and state not in self._by_identity:
-            raise EditError(f"No existe ningún objeto {identity_text(*state)} en este archivo")  # type: ignore[misc]
+            raise EditError(_("No existe ningún objeto {identity} en este archivo").format(
+                identity=identity_text(*state)))  # type: ignore[misc]
         description = Deferred("Editar {label}", label=self.full_label(position, path))
         return self._push(EditGroup((ValueEdit(position, path, before, state),), description))
 
@@ -417,11 +424,11 @@ class Document:
 
     def _sequence_item(self, position: int, path: tuple) -> tuple[object, list]:
         if self.objects[position].is_script:
-            raise EditError("Los scripts compilados son de solo lectura")
+            raise EditError(_("Los scripts compilados son de solo lectura"))
         found = edits.structural_parent(self.bod(position), path)
         if found is None:
-            raise EditError("Solo los elementos de una lista o las entradas de un mapa se pueden duplicar, "
-                            "quitar o mover (las tuplas tienen tamaño fijo)")
+            raise EditError(_("Solo los elementos de una lista o las entradas de un mapa se pueden duplicar, "
+                              "quitar o mover (las tuplas tienen tamaño fijo)"))
         container, node = found
         return node, container.items  # type: ignore[attr-defined]
 
@@ -450,10 +457,10 @@ class Document:
 
     def set_null(self, position: int, path: tuple) -> EditGroup:
         if self.objects[position].is_script:
-            raise EditError("Los scripts compilados son de solo lectura")
+            raise EditError(_("Los scripts compilados son de solo lectura"))
         tree = self.bod(position)
         if not edits.can_null(tree, path):
-            raise EditError("Solo un objeto o una referencia (fuera de tuplas y de claves) puede pasar a nulo")
+            raise EditError(_("Solo un objeto o una referencia (fuera de tuplas y de claves) puede pasar a nulo"))
         node = bod.resolve(tree, path)
         operation = ReplaceValue(position, path, node, bod.Null())
         return self._push(EditGroup((operation,), Deferred("Poner a nulo {label}", label=self.full_label(position, path))))
@@ -469,15 +476,15 @@ class Document:
         de partida, no del editado (que pudo haberlo anulado o movido).
         """
         if self.objects[position].is_script:
-            raise EditError("Los scripts compilados son de solo lectura")
+            raise EditError(_("Los scripts compilados son de solo lectura"))
         try:
             node = bod.resolve(self.baseline_tree(position), path)
         except IndexError:
             node = None
         if not isinstance(node, bod.BodObject) or node.cls.label() != class_label:
             raise EditError(
-                "Ese ejemplo ya no está donde lo registró el índice (el objeto cambió al guardar). "
-                "Vuelve a abrir el archivo para actualizar el índice."
+                _("Ese ejemplo ya no está donde lo registró el índice (el objeto cambió al guardar). "
+                  "Vuelve a abrir el archivo para actualizar el índice.")
             )
         copy = bod.clone(node)
         assert isinstance(copy, bod.BodObject)
@@ -487,11 +494,12 @@ class Document:
         """Pone ``value`` (un objeto ya copiado o una referencia) donde ahora hay un nulo."""
         node = self.node_at(position, path)
         if not isinstance(node, bod.Null):
-            raise EditError("Ahí no hay un nulo")
+            raise EditError(_("Ahí no hay un nulo"))
         if not isinstance(value, (bod.BodObject, bod.ExternalRef)):
-            raise EditError("Un nulo solo se rellena con un objeto o una referencia")
+            raise EditError(_("Un nulo solo se rellena con un objeto o una referencia"))
         if isinstance(value, bod.ExternalRef) and value.identity not in self._by_identity:
-            raise EditError(f"No existe ningún objeto {identity_text(*value.identity)} en este archivo")
+            raise EditError(_("No existe ningún objeto {identity} en este archivo").format(
+                identity=identity_text(*value.identity)))
         operation = ReplaceValue(position, path, node, value)
         return self._push(EditGroup((operation,), Deferred("Rellenar {label}", label=self.full_label(position, path))))
 
@@ -598,7 +606,7 @@ class Document:
         """El script entero (modelo editable detrás del árbol de presentación)."""
         tree = self.bod(position)
         if not isinstance(tree, script.ScriptTree):
-            raise EditError("Este objeto no es un script compilado")
+            raise EditError(_("Este objeto no es un script compilado"))
         return tree.script
 
     def cached_bod(self, position: int) -> bod.BodDocument | None:

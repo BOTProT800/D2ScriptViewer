@@ -15,7 +15,7 @@ from typing import Callable
 
 from .. import vocabulary
 from ..document import Document, ObjectInfo
-from ..i18n import N_, term
+from ..i18n import N_, _, ngettext, term
 from . import theme
 
 #: Modos de agrupar. El canónico es el que se guarda en ``config.json`` (``group_by``); el
@@ -62,24 +62,24 @@ class ObjectTree(ttk.Frame):
         self.type_var = tk.StringVar(value=term(ALL_TYPES))
         self.class_var = tk.StringVar()
         self.filter_var = tk.StringVar()
-        self.count_var = tk.StringVar(value="Sin archivo")
+        self.count_var = tk.StringVar(value=_("Sin archivo"))
 
-        ttk.Label(self, text="OBJETOS", style="Section.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Label(self, text=_("OBJETOS"), style="Section.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
         ttk.Label(self, textvariable=self.count_var, style="PanelMuted.TLabel").grid(row=0, column=2, columnspan=2, sticky="e")
 
-        ttk.Label(self, text="Agrupar", style="PanelMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(self, text=_("Agrupar"), style="PanelMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(8, 0))
         ttk.Combobox(self, textvariable=self.group_var, values=[group_label(mode) for mode in GROUP_MODES],
                      state="readonly", width=9).grid(
             row=1, column=1, sticky="ew", padx=(6, 8), pady=(8, 0)
         )
-        ttk.Label(self, text="Tipo", style="PanelMuted.TLabel").grid(row=1, column=2, sticky="w", pady=(8, 0))
+        ttk.Label(self, text=_("Tipo"), style="PanelMuted.TLabel").grid(row=1, column=2, sticky="w", pady=(8, 0))
         self.type_box = ttk.Combobox(self, textvariable=self.type_var, values=(term(ALL_TYPES),), state="readonly", width=22)
         self.type_box.grid(row=1, column=3, sticky="ew", padx=(6, 0), pady=(8, 0))
 
-        ttk.Label(self, text="Clase", style="PanelMuted.TLabel").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(self, text=_("Clase"), style="PanelMuted.TLabel").grid(row=2, column=0, sticky="w", pady=(6, 0))
         self.class_box = ttk.Combobox(self, textvariable=self.class_var, values=())
         self.class_box.grid(row=2, column=1, columnspan=3, sticky="ew", padx=(6, 0), pady=(6, 0))
-        ttk.Label(self, text="Filtrar", style="PanelMuted.TLabel").grid(row=3, column=0, sticky="w", pady=(6, 8))
+        ttk.Label(self, text=_("Filtrar"), style="PanelMuted.TLabel").grid(row=3, column=0, sticky="w", pady=(6, 8))
         self.filter_entry = ttk.Entry(self, textvariable=self.filter_var)
         self.filter_entry.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(6, 0), pady=(6, 8))
 
@@ -87,9 +87,9 @@ class ObjectTree(ttk.Frame):
             self, lambda parent: ttk.Treeview(parent, columns=("kind", "size"), show="tree headings", selectmode="browse")
         )
         frame.grid(row=4, column=0, columnspan=4, sticky="nsew")
-        self.tree.heading("#0", text="Objeto")
-        self.tree.heading("kind", text="Tipo")
-        self.tree.heading("size", text="Tamaño")
+        self.tree.heading("#0", text=_("Objeto"))
+        self.tree.heading("kind", text=_("Tipo"))
+        self.tree.heading("size", text=_("Tamaño"))
         self.tree.column("#0", width=190, minwidth=120, stretch=True)
         self.tree.column("kind", width=105, minwidth=60, stretch=False)
         self.tree.column("size", width=62, minwidth=50, stretch=False, anchor="e")
@@ -191,13 +191,13 @@ class ObjectTree(ttk.Frame):
     def _group_keys(self, info: ObjectInfo) -> list[str]:
         # En el juego toda ruta es «directorio/objeto»: el directorio siempre es el
         # último nivel de agrupación, para que ningún grupo tenga miles de objetos.
-        directory = info.path.split("/")[:-1] or ["(raíz)"]
+        directory = info.path.split("/")[:-1] or [_("(raíz)")]
         mode = self._mode
         if mode == "Ruta":
             return directory
         if mode == "Tipo":
             return [f"{info.entry.kind} · {info.kind_label}", *directory]
-        folder = info.folder.split("\\") if info.folder else ["(sin carpeta)"]
+        folder = info.folder.split("\\") if info.folder else [_("(sin carpeta)")]
         return [*folder, *directory]
 
     def _leaf_text(self, info: ObjectInfo) -> str:
@@ -218,7 +218,7 @@ class ObjectTree(ttk.Frame):
         self._root = _Group("")
         self._mode = self.group_mode
         if self.document is None:
-            self.count_var.set("Sin archivo")
+            self.count_var.set(_("Sin archivo"))
             return
         kind = self._kind_filter()
         class_text = self.class_var.get().strip().casefold()
@@ -239,7 +239,10 @@ class ObjectTree(ttk.Frame):
             group.objects.append(info.position)
         self._fill("", self._root)
         total = len(self.document.objects)
-        self.count_var.set(f"{visible:,} de {total:,}" if visible != total else f"{total:,} objetos")
+        if visible != total:
+            self.count_var.set(_("{visible:,} de {total:,}").format(visible=visible, total=total))
+        else:
+            self.count_var.set(ngettext("{count:,} objeto", "{count:,} objetos", total).format(count=total))
         if visible and visible <= AUTO_EXPAND_LIMIT and (kind is not None or class_text or needle):
             self._expand_all(self._root)
         self._last_reported = None

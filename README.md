@@ -46,6 +46,12 @@ python -m d2scriptviewer
 Abre el último archivo usado, el de `D2SV_OBSP` o el del juego. Abrir no bloquea ni modifica
 el archivo.
 
+**Idioma:** la interfaz está en español y en inglés. El menú **Idioma / Language** cambia de
+uno a otro al momento, sin cerrar la ventana ni perder los cambios, y recuerda la elección. La
+primera vez se usa el idioma de Windows. `D2SV_LANG=en` (o `es`) fija el idioma para esa sesión
+sin guardarlo. La línea de órdenes está solo en español. Los diálogos de abrir y guardar archivo
+y los botones Sí/No siguen el idioma de Windows.
+
 - **Objetos** (izquierda): agrupados por carpeta del editor, ruta o tipo; filtros por tipo,
   clase y texto.
 - **Propiedades** (centro): el árbol del objeto. Doble clic en una referencia (`→ …`) lleva a su
@@ -64,7 +70,9 @@ el archivo.
   listas largas. Con el objeto delante (`death/playercommon_movestates · MoveStates[44].JumpImpulse`,
   o con `::` en lugar de `·`) salta de objeto. Es lo que copian, con el clic derecho, «Copiar ruta
   de la propiedad» y «Copiar ruta completa». Si la ruta falla a mitad, se queda en la última
-  fila válida y la línea bajo el árbol dice qué tramo falló, con los nombres parecidos.
+  fila válida y la línea bajo el árbol dice qué tramo falló, con los nombres parecidos. Las rutas
+  copiadas en la interfaz inglesa (`Functions.onInit.0x004E`) también valen en la española, y al
+  revés.
 
 ### Editar
 
@@ -137,7 +145,8 @@ Avisos:
   (`scripts.original.obsp` si existe). Lleva solo valores, rutas y operaciones de estructura que
   copian contenido del propio original: se puede compartir sin distribuir datos del juego.
   Antes de escribirlo, la herramienta lo reaplica sobre el original y comprueba que da
-  exactamente el archivo actual.
+  exactamente el archivo actual. El parche es el mismo se cree en el idioma que se cree, y se
+  aplica en cualquiera de los dos.
 - **Aplicar parche…** aplica un parche como cambios pendientes (se deshacen de una vez con
   Ctrl+Z) que luego se guardan como siempre. Sirve, por ejemplo, para recuperar tus cambios
   después de que Steam restaure el original. Si algún objeto, propiedad o valor no es el que

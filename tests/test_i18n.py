@@ -20,7 +20,7 @@ from d2scriptviewer import i18n, i18n_en, settings, vocabulary
 from d2scriptviewer.document import Document
 from d2scriptviewer.formats import bod, script
 from tests import fixtures
-from tests.support import TempDirMixin
+from tests.support import TempDirMixin, real_bytes, requires_real_file
 
 PACKAGE = Path(d2scriptviewer.__file__).parent
 #: Lo que no puede salir en una traducción inglesa.
@@ -141,6 +141,69 @@ class CatalogTests(unittest.TestCase):
     def test_english_has_no_spanish_marks(self) -> None:
         texts = list(i18n_en.MESSAGES.values()) + [form for forms in i18n_en.PLURALS.values() for form in forms]
         self.assertEqual([text for text in texts if SPANISH_MARKS.search(text)], [])
+
+
+#: Módulos que solo usa la CLI (sigue en español) o que definen la traducción.
+CLI_ONLY = {"cli.py", "verification.py", "selftest.py", "wording.py", "__main__.py", *DYNAMIC}
+#: Funciones que solo usa la CLI.
+CLI_FUNCTIONS = {("formats/script.py", "disassembly_lines")}
+#: Literales canónicos con marcas del español: identificadores, claves del JSON y entradas que se aceptan.
+CANONICAL = {
+    ("diffing.py", "añadido"),  # clase de cambio (diffing.KINDS)
+    ("search.py", "símbolo"),  # dónde coincide un resultado (search.WHERE)
+    ("vocabulary.py", "categoría"),  # contexto de pgettext
+    ("document.py", "«"), ("document.py", "»"),  # comillas que Ctrl+G quita alrededor de una ruta
+    ("edits.py", "sí"),  # «sí» vale como true al editar un bool
+    ("export.py", "tamaño"), ("patches.py", "tamaño"),  # claves del JSON
+}
+SPANISH_WORDS = re.compile(r"\b(el|la|los|las|del|una|unos|que|para|sin|hay|está|son|con|por|como|antes|ningún|"
+                           r"ninguna|todavía|aquí|archivo|objeto|objetos|ruta|propiedad|cambios|copia|guardar)\b",
+                           re.IGNORECASE)
+TRANSLATING = {"_", "N_", "ngettext", "pgettext", "Deferred", "term"}
+
+
+def untranslated_literals() -> list[str]:
+    """Literales con aspecto de texto en español fuera de las funciones de traducción y de los docstrings."""
+    found = []
+    for path in sorted(PACKAGE.rglob("*.py")):
+        where = path.relative_to(PACKAGE).as_posix()
+        if path.name in CLI_ONLY:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        skipped: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                skipped.add(id(node.value))  # docstrings y comentarios de atributo
+            inside_translation = isinstance(node, ast.Call) and (_function_name(node) in TRANSLATING or (
+                isinstance(node.func, ast.Name) and node.func.id in TRANSLATING))
+            cli_function = isinstance(node, ast.FunctionDef) and (where, node.name) in CLI_FUNCTIONS
+            if inside_translation or cli_function:
+                skipped.update(id(sub) for sub in ast.walk(node))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str) or id(node) in skipped:
+                continue
+            text = node.value
+            if (where, text) in CANONICAL:
+                continue
+            if SPANISH_MARKS.search(text) or (" " in text.strip() and SPANISH_WORDS.search(text)):
+                found.append(f"{where}:{node.lineno}: {text!r}")
+    return found
+
+
+class ResidueTests(unittest.TestCase):
+    def test_no_untranslated_literals(self) -> None:
+        """Ningún texto en español de los módulos que llegan a la GUI se queda fuera del catálogo."""
+        self.assertEqual(untranslated_literals(), [])
+
+    def test_catalog_has_no_repeated_keys(self) -> None:
+        """Una clave repetida en el mismo diccionario se pisaría sin avisar."""
+        tree = ast.parse((PACKAGE / "i18n_en.py").read_text(encoding="utf-8"))
+        repeated = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                keys = [ast.literal_eval(key) for key in node.keys if key is not None]
+                repeated += [key for index, key in enumerate(keys) if key in keys[:index]]
+        self.assertEqual(repeated, [])
 
 
 class TemplateTests(unittest.TestCase):
@@ -278,7 +341,7 @@ class VocabularyTests(unittest.TestCase):
                 match = bod.find_path(tree, bod.parse_path_label(text), vocabulary.NAMES)
                 self.assertTrue(match.complete, match.message)
         match = bod.find_path(tree, bod.parse_path_label("Functons"), vocabulary.NAMES)
-        self.assertIn("«Functions»", match.message)  # el parecido se nombra como se ve
+        self.assertEqual(match.message, "“Functons” is not a field of the root. Similar: “Functions”")
         # Sin el vocabulario de la interfaz, solo vale la etiqueta canónica.
         self.assertFalse(bod.find_path(tree, bod.parse_path_label("Functions")).complete)
 
@@ -315,6 +378,176 @@ class VocabularyTests(unittest.TestCase):
         self.assertTrue(spanish.startswith("Editar death/death_desc · "))
         i18n.set_language(i18n.ENGLISH)
         self.assertEqual(document.undo_description, "Edit" + spanish.removeprefix("Editar"))
+
+
+def find(document: Document, position: int, label: str) -> tuple:
+    """La ruta de la etiqueta canónica ``label`` en el objeto ``position``."""
+    match = bod.find_path(document.bod(position), bod.parse_path_label(label))
+    assert match.complete, match.message
+    return match.path
+
+
+def first_script_literal(document: Document, position: int) -> tuple:
+    tree = document.bod(position)
+    functions = next(index for index, field in enumerate(tree.root.fields) if field.name.text == script.FUNCTIONS)
+    return next(path for path, node in bod.walk(tree.root)
+                if path[:1] == (functions,) and isinstance(node, bod.Int32))
+
+
+def tree_bytes(folder: Path) -> dict[str, bytes]:
+    return {path.relative_to(folder).as_posix(): path.read_bytes() for path in sorted(folder.rglob("*")) if path.is_file()}
+
+
+class LanguageIndependenceChecks(TempDirMixin):
+    """El idioma nunca cambia un byte de lo que se guarda, se exporta o se escribe en un parche (criterios 7 y 8)."""
+
+    data: bytes
+
+    def tearDown(self) -> None:
+        i18n.reset()
+
+    def edited(self) -> Document:  # pragma: no cover - lo define cada caso
+        raise NotImplementedError
+
+    def export_positions(self, document: Document) -> list[int] | None:
+        return None
+
+    def test_patch_is_the_same_in_both_languages_and_applies_in_the_other(self) -> None:
+        from d2scriptviewer import patches
+
+        created = {}
+        for code in (i18n.SPANISH, i18n.ENGLISH):
+            i18n.set_language(code)
+            document = self.edited()
+            created[code] = (patches.create_patch(self.data, document), document.current_data())
+        spanish, english = created[i18n.SPANISH][0], created[i18n.ENGLISH][0]
+        english["creado"] = spanish["creado"]
+        self.assertEqual(patches.dumps(english), patches.dumps(spanish))
+        for made_in, applied_in in ((i18n.SPANISH, i18n.ENGLISH), (i18n.ENGLISH, i18n.SPANISH)):
+            with self.subTest(creado=made_in, aplicado=applied_in):
+                i18n.set_language(applied_in)
+                fresh = Document.from_bytes(self.data)
+                patches.apply_patch(fresh, json.loads(patches.dumps(created[made_in][0])))
+                self.assertEqual(fresh.current_data(), created[made_in][1])
+
+    def test_saving_gives_the_same_file(self) -> None:
+        from d2scriptviewer import saving
+
+        saved = {}
+        for code in (i18n.SPANISH, i18n.ENGLISH):
+            i18n.set_language(code)
+            document = self.edited()
+            target = self.make_temp_dir() / "scripts.obsp"
+            result = saving.execute_save(saving.prepare_save(document), target, rotating_backups=False)
+            saved[code] = (target.read_bytes(), result.sha256)
+        self.assertEqual(saved[i18n.SPANISH], saved[i18n.ENGLISH])
+
+    def test_export_is_the_same(self) -> None:
+        from d2scriptviewer import export
+
+        exported = {}
+        for code in (i18n.SPANISH, i18n.ENGLISH):
+            i18n.set_language(code)
+            document = self.edited()
+            folder = self.make_temp_dir() / "export"
+            export.export_document(document, folder, self.export_positions(document))
+            exported[code] = tree_bytes(folder)
+        self.assertGreater(len(exported[i18n.SPANISH]), 2)
+        self.assertEqual(exported[i18n.SPANISH], exported[i18n.ENGLISH])
+
+
+class FixtureLanguageIndependenceTests(LanguageIndependenceChecks, unittest.TestCase):
+    data = fixtures.make_obsp()
+
+    def edited(self) -> Document:
+        document = Document.from_bytes(self.data)
+        desc = document.find("death/death_desc")[0].position
+        document.edit_text(desc, find(document, desc, "Health"), "250")
+        document.duplicate_item(desc, find(document, desc, "Tags[0]"))
+        document.remove_item(desc, find(document, desc, "Pairs[1]"))
+        test = document.find("scripts/test")[0].position
+        document.edit_text(test, first_script_literal(document, test), "22")
+        return document
+
+
+@requires_real_file
+class RealLanguageIndependenceTests(LanguageIndependenceChecks, unittest.TestCase):
+    """Las ediciones de las fases 5 a 7 con el archivo real, y una exportación de muestra."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data = real_bytes()
+
+    def edited(self) -> Document:
+        from d2scriptviewer.references import build_indexes
+
+        document = Document.from_bytes(self.data)
+        dictionary = build_indexes(document.obsp).dictionary
+        states = document.find("death/playercommon_movestates")[0].position
+        document.duplicate_item(states, find(document, states, "MoveStates[0]"))
+        document.edit_text(states, find(document, states, "MoveStates[45].JumpImpulse"), "700")
+        animations = document.find("death/death_animations")[0].position
+        document.edit_text(animations, find(document, animations, "Animations[435].AnimationName"), "D_WScy_Combo04",
+                           dictionary)
+        pause = document.find("ui_core/pausemenu")[0].position
+        document.edit_text(pause, find(document, pause, "Funciones.onInit.0x004E"), "false")
+        return document
+
+    def export_positions(self, document: Document) -> list[int]:
+        """Uno de cada diez objetos, más las 65 FloatTable y los editados (unos 850)."""
+        tables = [info.position for info in document.objects if info.entry.kind == 15]
+        return sorted({*range(0, len(document.objects), 10), *tables, *document.modified_positions})
+
+
+@requires_real_file
+class RealEnglishPathTests(unittest.TestCase):
+    """Ctrl+G con las etiquetas inglesas en todas las filas del archivo real (criterio 9)."""
+
+    def tearDown(self) -> None:
+        i18n.reset()
+
+    def test_round_trip_in_every_row(self) -> None:
+        import time
+
+        i18n.set_language(i18n.ENGLISH)
+        document = Document.from_bytes(real_bytes())
+        started = time.perf_counter()
+        rows = 0
+        misses = []
+        for info in document.objects:
+            tree = document.bod(info.position)
+            for path, _node in bod.walk(tree.root):
+                if not path:
+                    continue
+                rows += 1
+                label = i18n.text(document.full_label(info.position, path))
+                location = document.parse_location(label)
+                match = bod.find_path(tree, list(location.steps), vocabulary.NAMES)
+                if location.position != info.position or match != bod.PathMatch(path, None, ""):
+                    misses.append((info.path, path, match.path, match.message))
+        elapsed = time.perf_counter() - started
+        self.assertEqual(rows, 1_145_518)
+        note = "There are 2 “StageThreeHealthPct” fields in Members: the first one was chosen"
+        self.assertEqual(misses, [
+            ("wailing_host/wailing_host", (6, 6), (6, 6), note),
+            ("wailing_host/wailing_host", (6, 7), (6, 6), note),
+        ])
+        self.assertLess(elapsed, 180, f"{elapsed:.1f} s para {rows:,} filas")
+
+    def test_paths_from_the_modder_guide_in_english(self) -> None:
+        i18n.set_language(i18n.ENGLISH)
+        document = Document.from_bytes(real_bytes())
+        for text, value in (
+            ("ui_core/pausemenu · Functions.onInit.0x004E", "true"),
+            ("ui_core/pausemenu · Funciones.onInit.0x004E", "true"),
+            ("death/playercommon_movestates · MoveStates[44].JumpImpulse", "350"),
+        ):
+            with self.subTest(ruta=text):
+                location = document.parse_location(text)
+                tree = document.bod(location.position)
+                match = bod.find_path(tree, list(location.steps), vocabulary.NAMES)
+                self.assertTrue(match.complete, match.message)
+                self.assertEqual(vocabulary.value_text(bod.resolve(tree, match.path)), value)
 
 
 if __name__ == "__main__":

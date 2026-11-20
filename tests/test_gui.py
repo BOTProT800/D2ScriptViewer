@@ -12,6 +12,7 @@ import hashlib
 import re
 import time
 import tkinter as tk
+from tkinter import ttk
 import unittest
 from unittest import mock
 
@@ -294,13 +295,13 @@ class EditingGuiTests(TempDirMixin, unittest.TestCase):
         self.app.export_files(folder)
         self.assertTrue(pump(self.app, lambda: not self.app.exporting))
         self.assertTrue((folder / "manifest.json").is_file())
-        self.assertIn("Exportados 4 objetos y 1 tablas CSV", self.notes[-1])
+        self.assertIn("Exportados 4 objetos y 1 tabla CSV", self.notes[-1])
         self.type_into_editor("Health", "250")
         patch_path = self.folder / "cambios.d2svpatch.json"
         self.app.export_patch(patch_path)
         self.assertTrue(pump(self.app, lambda: not self.app.exporting))
         self.assertTrue(patch_path.is_file())
-        self.assertIn("1 objetos, 1 operaciones (1 valor)", self.notes[-1])
+        self.assertIn("1 objeto, 1 operación (1 valor)", self.notes[-1])
         edited = self.document.current_data()
         self.app.undo()
         self.app.apply_patch_file(patch_path)
@@ -698,12 +699,13 @@ class ObjectSearchGuiTests(unittest.TestCase):
         self.assertTrue(self.view.tree.item(chunk, "open"))
         # Con otra búsqueda, la fila seleccionada sigue si es un resultado.
         self.search(type_name="int32")
-        self.assertEqual(self.state(), ("Values[1100]", "1,101 de 1,200"))
+        # El español de la interfaz separa los miles con un espacio duro (fase 12).
+        self.assertEqual(self.state(), ("Values[1100]", "1 101 de 1 200"))
         # Desde la fila de un tramo cerrado, siguiente es su primer elemento y anterior el de antes.
         chunks = self.view.tree.get_children(self.view._iid_by_path[(0,)])
         self.view.tree.selection_set(chunks[1])
         self.view.next_result()
-        self.assertEqual(self.state(), ("Values[500]", "501 de 1,200"))
+        self.assertEqual(self.state(), ("Values[500]", "501 de 1 200"))
         self.view.tree.selection_set(chunks[1])
         self.view.previous_result()
         self.assertEqual(self.selected_label(), "Values[499]")
@@ -1404,6 +1406,257 @@ class LanguageGuiTests(TempDirMixin, unittest.TestCase):
                     app.destroy()
             self.assertEqual(json.loads(settings.config_path().read_text(encoding="utf-8"))["language"], "en")
         self.assertEqual(i18n.language(), "es")  # cerrar la ventana devuelve el idioma de la CLI
+
+
+#: Rastros del español en un texto de la interfaz inglesa: tildes, «ñ», signos y palabras que el inglés no usa.
+SPANISH_TEXT = re.compile(
+    # Las palabras que también son inglesas o teclas («Del», «Ctrl+Y»), solo en minúscula.
+    r"[áéíóúÁÉÍÓÚñÑ¿¡«»]|\b(de|en|y|el|la|del|un|es|se|al|su)\b|"
+    r"(?i:\b(los|las|una|que|para|sin|hay|con|por|como|este|esta|ruta|objeto|objetos|propiedad|archivo|cambio|"
+    r"cambios|copiar|guardar|buscar|abrir|editar|deshacer|rehacer|nulo|clave|valor|tipo|nombre|lista|cadena|"
+    r"referencia|tramo|elemento|elementos|funciones|miembros|estados|resultado|resultados)\b)"
+)
+#: Lo único que la interfaz inglesa muestra en español: el nombre del idioma y el menú que se lee en los dos.
+BILINGUAL = {"Español", "Idioma / Language"}
+
+
+def visible_texts(widget: tk.Misc) -> list[str]:
+    """Todos los textos que muestra ``widget`` y sus descendientes (sin el volcado hexadecimal)."""
+    texts: list[str] = []
+
+    def add(value: object) -> None:
+        text = str(value).strip()
+        if text:
+            texts.append(text)
+
+    def visit(item: tk.Misc) -> None:
+        if isinstance(item, tk.Wm):
+            add(item.title())
+        if isinstance(item, tk.Menu):
+            last = item.index("end")
+            for index in range(last + 1 if last is not None else 0):
+                if item.type(index) not in ("separator", "tearoff"):
+                    add(item.entrycget(index, "label"))
+                    add(item.entrycget(index, "accelerator"))
+        elif isinstance(item, ttk.Treeview):
+            for column in ("#0", *item.cget("columns")):
+                add(item.heading(column, "text"))
+
+            def rows(parent: str) -> None:
+                for iid in item.get_children(parent):
+                    add(item.item(iid, "text"))
+                    for value in item.item(iid, "values"):
+                        add(value)
+                    rows(iid)
+
+            rows("")
+        elif isinstance(item, ttk.Notebook):
+            for tab in item.tabs():
+                add(item.tab(tab, "text"))
+        elif isinstance(item, tk.Text):
+            if not getattr(item, "is_hex_dump", False):
+                add(item.get("1.0", "end"))
+        else:
+            for option in ("text", "textvariable"):
+                try:
+                    value = item.cget(option)
+                except tk.TclError:
+                    continue
+                add(item.getvar(str(value)) if option == "textvariable" and str(value) else value if option == "text" else "")
+            if isinstance(item, ttk.Combobox):
+                for value in item.cget("values"):
+                    add(value)
+        for child in list(item.children.values()):
+            visit(child)
+
+    visit(widget)
+    return texts
+
+
+@requires_tk
+class EnglishGuiTests(TempDirMixin, unittest.TestCase):
+    """La interfaz en inglés no deja restos en español (criterio 4 de la fase 12)."""
+
+    def setUp(self) -> None:
+        from d2scriptviewer.gui.app import ViewerApp
+
+        self.messages: list[str] = []
+        patcher = mock.patch("d2scriptviewer.gui.app.messagebox")
+        self.messagebox = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.app = ViewerApp(auto_open=False, persist_settings=False, language="en")
+        self.app.withdraw()
+        self.addCleanup(self.app.destroy)
+        self.app.ask = lambda _title, message, **_options: self.messages.append(message) or True
+        self.app.ask_save = lambda _title, message, **_options: self.messages.append(message) or False
+        self.app.inform = lambda _title, message: self.messages.append(message)
+        self.app.alert = lambda _title, message: self.messages.append(message)
+        self.app.read_clipboard = lambda: None
+        self.app.details.hex_text.is_hex_dump = True  # el volcado hexadecimal son datos
+        self.document = Document.from_bytes(goto_obsp())
+        self.app.set_document(self.document)
+        self.texts: list[str] = []
+        self.collect()
+        self.assertTrue(pump(self.app, lambda: self.app.indexes is not None))
+        self.view = self.app.property_view
+
+    def collect(self) -> None:
+        self.app.update()
+        self.texts += visible_texts(self.app)
+
+    def residue(self) -> list[str]:
+        texts = self.texts + self.messages
+        for call in self.messagebox.method_calls:
+            texts += [str(argument) for argument in call.args]
+        found = []
+        for text in texts:
+            if text in BILINGUAL:
+                continue
+            for line in text.splitlines():
+                if SPANISH_TEXT.search(line.replace("Español", "").replace("Idioma / Language", "")) and line not in found:
+                    found.append(line)
+        return found
+
+    def position(self, path: str) -> int:
+        return self.document.find(path)[0].position
+
+    def rows(self, limit: int = 80) -> list[tuple]:
+        tree = self.view.document
+        return [path for path, _node in bod.walk(tree.root) if path][:limit] if tree is not None else []
+
+    def test_no_spanish_left(self) -> None:
+        app, view = self.app, self.view
+        # Cada objeto, cada fila (con su pista y su menú contextual) y las pestañas de detalles.
+        for info in self.document.objects:
+            app.navigate(info.position)
+            self.assertTrue(pump(app, lambda: app._decoding is None))
+            for path in self.rows():
+                view.reveal(path)
+                app.update()
+                self.texts.append(view.hint_var.get())
+                iid = view._iid_by_path.get(path)
+                if iid is not None:
+                    menu = view.context_menu(iid)
+                    if menu is not None:
+                        self.texts += visible_texts(menu)
+                        menu.destroy()
+            for tab in range(len(app.details.notebook.tabs())):
+                app.details.notebook.select(tab)
+                self.collect()
+        # Edición: valores, avisos, errores, deshacer y rehacer.
+        desc = self.position("death/death_desc")
+        app.navigate(desc)
+        tree = self.document.bod(desc)
+        labels = {bod.path_label(tree, path): path for path, _node in bod.walk(tree.root) if path}
+        for label, text in (("Health", "250"), ("Health", "abc"), ("Speed", "1e40"), ("Comment", "ñandú"),
+                            ("Mesh", "brand_new_mesh"), ("Visible", "maybe")):
+            node = bod.resolve(tree, labels[label])
+            self.texts.append(app.edit_hint(node, labels[label], text)[1])
+            error = app.commit_text_edit(node, labels[label], text)
+            if error:
+                self.texts.append(error)
+            self.collect()
+        app.undo()
+        self.collect()
+        app.redo()
+        self.collect()
+        # Estructura: duplicar una entrada de pares avisa de la clave repetida; poner a nulo.
+        pairs = labels["Pairs[0]"]
+        app.structure_action("duplicate", pairs)
+        self.collect()
+        app.structure_action("up", labels["Pairs[0]"])
+        self.collect()
+        app.undo()  # la clave repetida impediría guardar más abajo
+        app.undo()
+        self.collect()
+        # Búsqueda en el objeto: contador con resultados, sin ellos y por tipo.
+        for query in (("Health", "", ""), ("zzz", "", ""), ("", "string", ""), ("", "(any)", "")):
+            view.set_search_query(*query)
+            view.run_search()
+            self.collect()
+        # Ir a una ruta: varios fallos.
+        for text in ("Stats.Damag", "Tags[99]", "Pairs[0].foo", "Health.x", "Stats[0]", "nope/obj · Health",
+                     "Tags[x]", "Stats..Damage", "]", "death/death_desc.Health", ""):
+            app.open_goto()
+            app.go_to_location(text)
+            app.update()
+            self.texts.append(view.hint_var.get())
+        app.navigate(self.position("scripts/test"))
+        for text in ("Functions.OnStart.0x0001", "Functions.Nope", "Members.Health.x"):
+            app.go_to_location(text)
+            app.update()
+            self.texts.append(view.hint_var.get())
+        app.navigate(self.position("base/twice"))
+        app.go_to_location("Twice")
+        app.update()
+        self.texts.append(view.hint_var.get())
+        # Búsqueda global y cambios pendientes.
+        app.open_search()
+        window = app.search_window
+        window.query_var.set("Health")
+        window.start()
+        self.assertTrue(pump(app, lambda: str(window.search_button.cget("state")) == "normal"))
+        self.collect()
+        window.close()
+        app.open_pending()
+        self.collect()
+        app.pending_window.destroy()
+        # Diálogos: cambiar una referencia y rellenar un nulo.
+        from d2scriptviewer.gui.editors import FillNullDialog, ReferencePicker
+
+        picker = ReferencePicker(app, self.document, self.document.objects[desc].identity, "title")
+        self.collect()
+        picker.destroy()
+        picker = ReferencePicker(app, self.document, None, "title")
+        self.collect()
+        picker.destroy()
+        dialog = FillNullDialog(app, self.document, "title", ("Owner", "Field", "elemento"),
+                                [("Stats", 2, [(desc, labels["Stats"])])], 3)
+        self.collect()
+        dialog.destroy()
+        app.navigate(desc)
+        app.fill_null(labels["Health"])  # no es un nulo con ejemplos: lo explica
+        # Rellenar un nulo de verdad abre el diálogo modal: se recogen sus textos en vez de esperar.
+        with mock.patch.object(FillNullDialog, "choose", lambda dialog: self.texts.extend(visible_texts(dialog))
+                               or dialog.destroy()):
+            app.structure_action("null", labels["Behavior"])
+            app.structure_action("fill", labels["Behavior"])
+            app.undo()
+        self.collect()
+        # Guardar dos veces (la segunda crea la copia del original), exportar, parche y restaurar.
+        folder = self.make_temp_dir()
+        target = folder / "scripts.obsp"
+        app._start_save(target)
+        self.assertTrue(pump(app, lambda: not app.saving))
+        app.commit_text_edit(bod.resolve(tree, labels["Health"]), labels["Health"], "300")
+        app._start_save(target)
+        self.assertTrue(pump(app, lambda: not app.saving))
+        self.collect()
+        app.export_files(folder / "export")  # base/big_list no tiene la forma de una FloatTable: da su error
+        self.assertTrue(pump(app, lambda: not app.exporting))
+        from d2scriptviewer import export
+
+        self.messages.append(export.ExportResult(folder, 7862, 65, 120_000_000).summary())
+        patch_path = folder / "changes.d2svpatch.json"
+        app.export_patch(patch_path)
+        self.assertTrue(pump(app, lambda: not app.exporting))
+        self.collect()
+        app.restore_original_file()
+        self.assertTrue(pump(app, lambda: not app.saving and app.document is not self.document, timeout=30))
+        self.assertTrue(pump(app, lambda: app.indexes is not None))
+        self.collect()
+        app.apply_patch_file(patch_path)
+        self.collect()
+        app.apply_patch_file(folder / "missing.d2svpatch.json")
+        app._about()
+        self.assertTrue(app.change_language("es"))
+        self.assertTrue(app.change_language("en"))
+        self.collect()
+        self.assertEqual(self.residue(), [])
+        # Que el recorrido de verdad vio la interfaz inglesa.
+        joined = "\n".join(self.texts + self.messages)
+        for expected in ("Functions", "Pending Changes", "Original backup created", "Patch saved in", "Interface language"):
+            self.assertIn(expected, joined)
 
 
 def i18n_text(value: object) -> str:

@@ -32,8 +32,7 @@ from typing import Callable
 
 from .. import edits, i18n, search, vocabulary
 from ..formats import bod, script
-from ..i18n import _
-from ..wording import count as count_text
+from ..i18n import _, ngettext
 from . import theme
 from .editors import InlineEditor
 
@@ -113,7 +112,7 @@ class PropertyView(ttk.Frame):
         self.hint_var = tk.StringVar(value="")
         header = ttk.Frame(self, style="Panel.TFrame")
         header.pack(fill="x", pady=(0, 8))
-        ttk.Label(header, text="PROPIEDADES", style="Section.TLabel").pack(side="left")
+        ttk.Label(header, text=_("PROPIEDADES"), style="Section.TLabel").pack(side="left")
         self.toolbar = ttk.Frame(header, style="Panel.TFrame")
         self.toolbar.pack(side="right")
         ttk.Label(self, textvariable=self.title_var, style="Panel.TLabel", font=("Segoe UI Semibold", 11)).pack(
@@ -130,9 +129,9 @@ class PropertyView(ttk.Frame):
             horizontal=True,
         )
         frame.pack(fill="both", expand=True)
-        self.tree.heading("#0", text="Nombre")
-        self.tree.heading("type", text="Tipo")
-        self.tree.heading("value", text="Valor")
+        self.tree.heading("#0", text=_("Nombre"))
+        self.tree.heading("type", text=_("Tipo"))
+        self.tree.heading("value", text=_("Valor"))
         # Anchos iniciales modestos: las columnas elásticas crecen con el panel.
         self.tree.column("#0", width=170, minwidth=120, stretch=True)
         self.tree.column("type", width=75, minwidth=60, stretch=False)
@@ -168,16 +167,16 @@ class PropertyView(ttk.Frame):
         bar = ttk.Frame(self, style="Panel.TFrame")
         bar.pack(fill="x", pady=(0, 6))
         self.search_bar = bar
-        ttk.Label(bar, text="Nombre", style="PanelMuted.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(bar, text=_("Nombre"), style="PanelMuted.TLabel").grid(row=0, column=0, sticky="w")
         self.search_name = ttk.Entry(bar, textvariable=self.search_name_var, width=8)
         self.search_name.grid(row=0, column=1, sticky="ew", padx=(4, 8))
-        ttk.Label(bar, text="Tipo", style="PanelMuted.TLabel").grid(row=0, column=2, sticky="w")
+        ttk.Label(bar, text=_("Tipo"), style="PanelMuted.TLabel").grid(row=0, column=2, sticky="w")
         self.search_type = ttk.Combobox(
             bar, textvariable=self.search_type_var, values=(i18n.term(search.ANY_TYPE),), width=9, height=20,
             postcommand=self._fill_type_choices,
         )
         self.search_type.grid(row=0, column=3, sticky="ew", padx=(4, 8))
-        ttk.Label(bar, text="Valor", style="PanelMuted.TLabel").grid(row=0, column=4, sticky="w")
+        ttk.Label(bar, text=_("Valor"), style="PanelMuted.TLabel").grid(row=0, column=4, sticky="w")
         self.search_value = ttk.Entry(bar, textvariable=self.search_value_var, width=8)
         self.search_value.grid(row=0, column=5, sticky="ew", padx=(4, 8))
         self.search_previous = ttk.Button(bar, text="‹", width=2, style="Small.TButton", command=self.previous_result)
@@ -208,7 +207,7 @@ class PropertyView(ttk.Frame):
         self.goto_var = tk.StringVar()
         bar = ttk.Frame(self, style="Panel.TFrame")
         self.goto_bar = bar
-        ttk.Label(bar, text="Ir a", style="PanelMuted.TLabel").pack(side="left")
+        ttk.Label(bar, text=_("Ir a"), style="PanelMuted.TLabel").pack(side="left")
         self.goto_entry = ttk.Entry(bar, textvariable=self.goto_var)
         self.goto_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
         for sequence in ("<Return>", "<KP_Enter>"):
@@ -328,10 +327,10 @@ class PropertyView(ttk.Frame):
         self._insert_children("", document.root, ())
         self._populated.add("")
         if isinstance(document, script.ScriptTree):
-            self.set_hint("Script compilado: doble clic o F2 edita los literales int, float y bool y los valores "
-                          "de esos tipos; lo demás es de solo lectura")
+            self.set_hint(_("Script compilado: doble clic o F2 edita los literales int, float y bool y los valores "
+                            "de esos tipos; lo demás es de solo lectura"))
         else:
-            self.set_hint("Doble clic o F2 para editar un valor · clic derecho para más opciones")
+            self.set_hint(_("Doble clic o F2 para editar un valor · clic derecho para más opciones"))
         # Al cambiar de objeto los criterios se conservan y la selección no se mueve.
         self.run_search()
 
@@ -574,11 +573,14 @@ class PropertyView(ttk.Frame):
         if self.document is None or search.is_empty_query(*self._query()):
             text = ""
         elif not self.search_results:
-            text = "Sin resultados"
+            text = _("Sin resultados")
         else:
             rank = self._search_rank.get(self._selected_path())  # type: ignore[arg-type]
             total = len(self.search_results)
-            text = f"{rank + 1:,} de {total:,}" if rank is not None else count_text(total, "resultado")
+            if rank is not None:
+                text = _("{rank:,} de {total:,}").format(rank=rank + 1, total=total)
+            else:
+                text = ngettext("{count:,} resultado", "{count:,} resultados", total).format(count=total)
         self.search_count_var.set(text)
 
     # --- Selección -----------------------------------------------------------------------
@@ -611,30 +613,31 @@ class PropertyView(ttk.Frame):
         node, path = selected
         warning = edits.identifier_warning(edits.field_name(self.document, path), node) if edits.is_editable(node) else None
         actions = self.structure_actions(node, path)
-        structure = ""
+        parts = []
         if "duplicate" in actions:
-            structure = " · Ctrl+D duplica, Supr elimina, Alt+↑/↓ mueve"
+            parts.append(_("Ctrl+D duplica, Supr elimina, Alt+↑/↓ mueve"))
         if "null" in actions:
-            structure += " · clic derecho: poner a nulo"
+            parts.append(_("clic derecho: poner a nulo"))
         if "fill" in actions:
-            structure += " · clic derecho: rellenar con un objeto"
+            parts.append(_("clic derecho: rellenar con un objeto"))
+        structure = "".join(" · " + part for part in parts)
         if warning:
             self.set_hint(warning, "warn")
         elif isinstance(node, bod.ExternalRef):
-            self.set_hint("Doble clic o Intro para ir al destino · F2 para cambiar la referencia" + structure)
+            self.set_hint(_("Doble clic o Intro para ir al destino · F2 para cambiar la referencia") + structure)
         elif isinstance(node, bod.HashedString):
-            self.set_hint("F2 o doble clic para cambiar la cadena: sugiere las del archivo y admite nuevas"
-                          " (distingue mayúsculas)" + structure)
+            self.set_hint(_("F2 o doble clic para cambiar la cadena: sugiere las del archivo y admite nuevas"
+                            " (distingue mayúsculas)") + structure)
         elif isinstance(node, bod.Note):
-            self.set_hint("Solo lectura: en los scripts solo se editan los literales int, float y bool y los "
-                          "valores de esos tipos, sin cambiar tamaños")
+            self.set_hint(_("Solo lectura: en los scripts solo se editan los literales int, float y bool y los "
+                            "valores de esos tipos, sin cambiar tamaños"))
         elif edits.is_editable(node):
-            self.set_hint("Doble clic o F2 para editar" + structure)
+            self.set_hint(_("Doble clic o F2 para editar") + structure)
         elif structure:
             text = structure.removeprefix(" · ")
             self.set_hint(text[:1].upper() + text[1:])
         elif isinstance(node, bod.BodTuple) or (path and isinstance(bod.resolve(self.document, path[:-1]), bod.BodTuple)):
-            self.set_hint("Las tuplas tienen tamaño fijo en el juego: solo se editan sus valores")
+            self.set_hint(_("Las tuplas tienen tamaño fijo en el juego: solo se editan sus valores"))
         else:
             self.set_hint("")
 
@@ -681,11 +684,11 @@ class PropertyView(ttk.Frame):
             return
         node, path = selected
         if isinstance(self.document, script.ScriptTree) and not isinstance(node, script.EDITABLE_VALUES):
-            self.set_hint("Solo lectura: en los scripts solo se editan los literales int, float y bool y los "
-                          "valores de esos tipos, sin cambiar tamaños", "warn")
+            self.set_hint(_("Solo lectura: en los scripts solo se editan los literales int, float y bool y los "
+                            "valores de esos tipos, sin cambiar tamaños"), "warn")
             return
         if not edits.is_editable(node):
-            self.set_hint("Este valor no se edita escribiendo: usa el clic derecho para las operaciones de estructura",
+            self.set_hint(_("Este valor no se edita escribiendo: usa el clic derecho para las operaciones de estructura"),
                           "warn")
             return
         if isinstance(node, bod.ExternalRef):
@@ -741,21 +744,21 @@ class PropertyView(ttk.Frame):
         node, path = self._items[iid]
         menu = tk.Menu(self, tearoff=False)
         if isinstance(node, bod.ExternalRef):
-            menu.add_command(label="Ir al destino", command=lambda: self.on_follow_ref(node.identity))
-            menu.add_command(label="Cambiar referencia…", accelerator="F2", command=self.begin_edit)
+            menu.add_command(label=_("Ir al destino"), command=lambda: self.on_follow_ref(node.identity))
+            menu.add_command(label=_("Cambiar referencia…"), accelerator="F2", command=self.begin_edit)
         elif edits.is_editable(node):
-            menu.add_command(label="Editar", accelerator="F2", command=self.begin_edit)
+            menu.add_command(label=_("Editar"), accelerator="F2", command=self.begin_edit)
         if path in self.edited_paths and self.on_revert_property is not None:
-            menu.add_command(label="Revertir esta propiedad", command=lambda: self.on_revert_property(path))
+            menu.add_command(label=_("Revertir esta propiedad"), command=lambda: self.on_revert_property(path))
         self._add_structure_entries(menu, node, path)
         menu.add_separator()
-        menu.add_command(label="Copiar valor", command=lambda: self._copy(self._value_text(node)))
+        menu.add_command(label=_("Copiar valor"), command=lambda: self._copy(self._value_text(node)))
         document = self.document
-        menu.add_command(label="Copiar ruta de la propiedad",
+        menu.add_command(label=_("Copiar ruta de la propiedad"),
                          command=lambda: self._copy(vocabulary.path_label(document, path)))
         if self.full_label is not None:
             full_label = self.full_label
-            menu.add_command(label="Copiar ruta completa", command=lambda: self._copy(i18n.text(full_label(path))))
+            menu.add_command(label=_("Copiar ruta completa"), command=lambda: self._copy(i18n.text(full_label(path))))
         return menu
 
     def structure_actions(self, node: object, path: tuple) -> list[str]:
@@ -785,12 +788,12 @@ class PropertyView(ttk.Frame):
             return
         menu.add_separator()
         labels = {
-            "duplicate": ("Duplicar elemento", "Ctrl+D"),
-            "remove": ("Eliminar elemento", "Supr"),
-            "up": ("Subir", "Alt+↑"),
-            "down": ("Bajar", "Alt+↓"),
-            "null": ("Poner a nulo", ""),
-            "fill": ("Rellenar con un objeto…", ""),
+            "duplicate": (_("Duplicar elemento"), "Ctrl+D"),
+            "remove": (_("Eliminar elemento"), _("Supr")),
+            "up": (_("Subir"), "Alt+↑"),
+            "down": (_("Bajar"), "Alt+↓"),
+            "null": (_("Poner a nulo"), ""),
+            "fill": (_("Rellenar con un objeto…"), ""),
         }
         assert self.on_structure is not None
         for action in actions:

@@ -9,9 +9,11 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
+from .. import i18n
 from ..binary import hex_dump
 from ..document import Document, ObjectInfo
 from ..formats.obsp import identity_text
+from ..i18n import _
 from ..references import FileIndexes
 from . import theme
 from .script_view import ScriptView
@@ -29,28 +31,28 @@ class DetailsPanel(ttk.Frame):
         self._hex_dirty = True
         self._ref_targets: dict[str, tuple[int, tuple | None]] = {}
 
-        ttk.Label(self, text="DETALLES", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Label(self, text=_("DETALLES"), style="Section.TLabel").pack(anchor="w", pady=(0, 8))
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
         info_frame, self.info_text = theme.scrolled(self.notebook, lambda parent: theme.text_widget(parent, height=12))
         self.info_text.configure(wrap="word", font=("Segoe UI", 10))
-        self.notebook.add(info_frame, text="Detalles")
+        self.notebook.add(info_frame, text=_("Detalles"))
 
         hex_tab = ttk.Frame(self.notebook, style="Panel.TFrame")
         self.hex_var = tk.StringVar(value="")
         ttk.Label(hex_tab, textvariable=self.hex_var, style="PanelMuted.TLabel").pack(anchor="w", pady=(4, 4))
         hex_frame, self.hex_text = theme.scrolled(hex_tab, lambda parent: theme.text_widget(parent), horizontal=True)
         hex_frame.pack(fill="both", expand=True)
-        self.notebook.add(hex_tab, text="Hex")
+        self.notebook.add(hex_tab, text=_("Hex"))
 
         refs_tab = ttk.Panedwindow(self.notebook, orient="vertical")
-        self.refs_out = self._ref_tree(refs_tab, "Apunta a", ("Propiedad", "Objeto"))
-        self.refs_in = self._ref_tree(refs_tab, "Usado por", ("Objeto", "Propiedad"))
-        self.notebook.add(refs_tab, text="Referencias")
+        self.refs_out = self._ref_tree(refs_tab, _("Apunta a"), (_("Propiedad"), _("Objeto")))
+        self.refs_in = self._ref_tree(refs_tab, _("Usado por"), (_("Objeto"), _("Propiedad")))
+        self.notebook.add(refs_tab, text=_("Referencias"))
 
         self.script_view = ScriptView(self.notebook)
-        self.notebook.add(self.script_view, text="Script")
+        self.notebook.add(self.script_view, text=_("Script"))
 
         self.notebook.bind("<<NotebookTabChanged>>", lambda _event: self._render_hex_if_visible())
 
@@ -90,16 +92,16 @@ class DetailsPanel(ttk.Frame):
         self.info = info
         entry = info.entry
         lines = [
-            ("Ruta", info.path),
-            ("Nombre", info.name),
-            ("Clase", info.class_name or "—"),
-            ("Carpeta", info.folder or "—"),
-            ("Identidad", identity_text(entry.group, entry.object_id)),
-            ("Grupo", str(entry.group)),
-            ("Tipo", f"{entry.kind} · {info.kind_label}"),
-            ("Offset", f"0x{entry.offset:X} ({entry.offset:,})"),
-            ("Tamaño", f"{entry.size:,} bytes"),
-            ("Posición en el índice", f"{info.position:,}"),
+            (_("Ruta"), info.path),
+            (_("Nombre"), info.name),
+            (_("Clase"), info.class_name or "—"),
+            (_("Carpeta"), info.folder or "—"),
+            (_("Identidad"), identity_text(entry.group, entry.object_id)),
+            (_("Grupo"), str(entry.group)),
+            (_("Tipo"), f"{entry.kind} · {info.kind_label}"),
+            (_("Offset"), _("0x{offset:X} ({offset:,})").format(offset=entry.offset)),
+            (_("Tamaño"), _("{size:,} bytes").format(size=entry.size)),
+            (_("Posición en el índice"), _("{position:,}").format(position=info.position)),
         ]
         lines.extend(extra or [])
         theme.set_text(self.info_text, "\n".join(f"{key}:  {value}" for key, value in lines))
@@ -110,9 +112,9 @@ class DetailsPanel(ttk.Frame):
             try:
                 self.script_view.show(document.script_header(info.position), entry.size)
             except Exception as error:  # noqa: BLE001 - se muestra al usuario
-                self.script_view.clear(f"No se pudo leer la cabecera: {error}")
+                self.script_view.clear(_("No se pudo leer la cabecera: {error}").format(error=error))
         else:
-            self.script_view.clear("Este objeto no es un script compilado.")
+            self.script_view.clear(_("Este objeto no es un script compilado."))
 
     def invalidate_hex(self) -> None:
         self._hex_dirty = True
@@ -127,10 +129,11 @@ class DetailsPanel(ttk.Frame):
         blob = self.document.blob(self.info.position)
         modified = self.document.is_modified(self.info.position)
         offset = self.info.entry.offset
-        self.hex_var.set(
-            f"{len(blob):,} bytes · offsets absolutos en el archivo"
-            + (" · versión editada (aún sin guardar)" if modified else "")
-        )
+        if modified:
+            self.hex_var.set(_("{size:,} bytes · offsets absolutos en el archivo · versión editada (aún sin guardar)").format(
+                size=len(blob)))
+        else:
+            self.hex_var.set(_("{size:,} bytes · offsets absolutos en el archivo").format(size=len(blob)))
         theme.set_text(self.hex_text, hex_dump(blob, offset))
 
     def set_indexes(self, indexes: FileIndexes | None) -> None:
@@ -145,22 +148,22 @@ class DetailsPanel(ttk.Frame):
             return
         if self.indexes is None:
             for tree in (self.refs_out, self.refs_in):
-                tree.title_var.set(f"{tree.base_title} (indexando…)")  # type: ignore[attr-defined]
+                tree.title_var.set(_("{title} (indexando…)").format(title=tree.base_title))  # type: ignore[attr-defined]
             return
         document = self.document
         outgoing = self.indexes.references.references_from(self.info.position)
         for reference in outgoing:
             target = document.object_by_identity(reference.target)
-            label = target.label() if target else f"(no existe) {identity_text(*reference.target)}"
-            iid = self.refs_out.insert("", "end", values=(reference.label, label))
+            label = target.label() if target else _("(no existe) {identity}").format(identity=identity_text(*reference.target))
+            iid = self.refs_out.insert("", "end", values=(i18n.text(reference.label), label))
             self._ref_targets[iid] = (target.position, None) if target else (-1, None)
         incoming = self.indexes.references.references_to(self.info.identity)
         for reference in incoming:
             source = document.objects[reference.source]
-            iid = self.refs_in.insert("", "end", values=(source.label(), reference.label))
+            iid = self.refs_in.insert("", "end", values=(source.label(), i18n.text(reference.label)))
             self._ref_targets[iid] = (reference.source, reference.path)
-        self.refs_out.title_var.set(f"Apunta a ({len(outgoing)})")  # type: ignore[attr-defined]
-        self.refs_in.title_var.set(f"Usado por ({len(incoming)})")  # type: ignore[attr-defined]
+        self.refs_out.title_var.set(_("Apunta a ({count:,})").format(count=len(outgoing)))  # type: ignore[attr-defined]
+        self.refs_in.title_var.set(_("Usado por ({count:,})").format(count=len(incoming)))  # type: ignore[attr-defined]
 
     def _follow(self, tree: ttk.Treeview) -> str:
         selection = tree.selection()
