@@ -1,5 +1,26 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Versión 1.2.0 publicada (2026-11-20).** El usuario pidió que el push y la etiqueta los hiciera
+> Claude, y que se señalara el tema de la versión con las notas de la release y con temas en el
+> repositorio.
+>
+> - **Push:** `main` pasó de `b8164fd` a `ab3467d`, y la etiqueta anotada `v1.2.0` apunta a
+>   `ab3467d`.
+> - **Workflows:** terminaron bien `release.yml` (run 44848448815) y los tests de `main` (run
+>   44848428950).
+> - **Release:** https://github.com/BOTProT800/D2ScriptViewer/releases/tag/v1.2.0, publicada, sin
+>   marcar como borrador ni prerelease, y la última del repositorio. Lleva:
+>   - `D2ScriptViewer.exe` (11,4 MB);
+>   - la rueda y el `.tar.gz` de la 1.2.0;
+>   - `LICENSE`, `LICENSE-Python.txt`, `LICENSE-PyInstaller.txt`, `LICENSE-TclTk.txt`,
+>     `THIRD_PARTY_NOTICES.md` y `VERSIONES.txt`.
+> - **Notas:** las automáticas se sustituyeron desde la web, con la sesión del usuario, por el
+>   borrador en inglés de `build\release-notes-1.2.0.md`. Llevan una línea en español y el enlace
+>   «Full Changelog». En las notas de una release cada salto de línea se ve, así que cada párrafo
+>   va en una sola línea.
+> - **Temas del repositorio:** `darksiders`, `darksiders-2`, `modding`, `obsp` y `tkinter`. La
+>   descripción y la web del repositorio siguen vacías.
+
 > **Versión 1.2.0 preparada (2026-11-20).** El usuario pidió prepararla para publicarla. Recoge la
 > fase 12. `__version__` pasa a `1.2.0` y la sección `[Unreleased]` del `CHANGELOG.md` queda como
 > `[1.2.0] - 2026-11-20`, con una línea más: la autoprueba en los dos idiomas. `pyproject.toml`
