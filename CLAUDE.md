@@ -43,7 +43,8 @@ primera release; la 1.0.0 nunca se etiquetó. El repositorio es público. El pus
 los decide el usuario; para la 1.1.0 pidió que los hiciera Claude. Fase 12 (interfaz en inglés,
 con el idioma seleccionable) cerrada el 20 de noviembre de 2026: menú «Idioma / Language» con
 cambio en caliente, inglés por defecto, y `README.en.md` y `GUIA_MODDER.en.md`; sus decisiones, al
-principio del plan. La versión 1.2.0 y su release las decide el usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+principio del plan. Versión 1.2.0 (fase 12) preparada en local el 20 de noviembre de 2026, sin
+push ni etiqueta. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 

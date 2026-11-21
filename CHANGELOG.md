@@ -7,6 +7,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-20
+
 ### Added
 
 - Interfaz en inglés (fase 12), con el menú «Idioma / Language» (English / Español) antes de
@@ -29,6 +31,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   órdenes conserva la coma.
 - Plurales corregidos en singular: «1 objeto, 1 operación», «1 tabla CSV», «1 función» en las
   filas de los scripts (antes «1 objetos», «1 funciones»…).
+- La autoprueba del ejecutable (`--autoprueba`) comprueba también el catálogo inglés y construye
+  la ventana principal en los dos idiomas. Su informe sigue en español.
 
 ## [1.1.0] - 2026-11-19
 

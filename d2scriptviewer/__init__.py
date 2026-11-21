@@ -3,4 +3,4 @@
 
 """D2ScriptViewer: visor y editor de scripts.obsp de Darksiders II Deathinitive Edition."""
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"

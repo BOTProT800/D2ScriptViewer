@@ -1,5 +1,33 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Versión 1.2.0 preparada (2026-11-20).** El usuario pidió prepararla para publicarla. Recoge la
+> fase 12. `__version__` pasa a `1.2.0` y la sección `[Unreleased]` del `CHANGELOG.md` queda como
+> `[1.2.0] - 2026-11-20`, con una línea más: la autoprueba en los dos idiomas. `pyproject.toml`
+> declara también el inglés (`Natural Language :: English`).
+>
+> - **Estado en GitHub:** `origin/main` sigue en `b8164fd`, la etiqueta `v1.1.0`, la única que
+>   hay. `main` lleva por delante los 6 commits de después (el plan de la 1.1.0 y la fase 12) y el
+>   de esta versión.
+> - **Comprobado en local:**
+>   - 306 tests, ninguno omitido, en 218 s, con una copia del original del juego (SHA
+>     `B46DD3DA…`) en `D2SV_OBSP`;
+>   - `dist\D2ScriptViewer.exe` (11,2 MB) con PyInstaller 6.22.3: la autoprueba dice
+>     «D2ScriptViewer 1.2.0 · Python 3.12.5 · congelado», 32 módulos, catálogo inglés con 540
+>     textos y 25 plurales y la ventana en los dos idiomas con Tcl/Tk 8.6.13; todo correcto,
+>     código de salida 0.
+> - **Notas de la release:** `release.yml` sigue con `--generate-notes`, que solo trae el enlace a
+>   los commits. Hay un borrador en inglés, con una línea en español, en
+>   `build\release-notes-1.2.0.md` (fuera del repositorio), para pegarlo en la release y en Nexus
+>   Mods.
+> - **Lo que decide el usuario:**
+>   1. `git push origin main`;
+>   2. `git tag -a v1.2.0 -m "D2ScriptViewer 1.2.0"` y `git push origin v1.2.0`, que lanza
+>      `release.yml`;
+>   3. pegar las notas en la release.
+>
+>   Si el workflow falla, se borra la etiqueta (local y remota), se corrige y se vuelve a
+>   etiquetar.
+
 > **Fase 12 cerrada (2026-11-20): interfaz en inglés, con el idioma seleccionable.** El usuario
 > revisó la interfaz inglesa y la dio por buena («está bien así, por ahora»). Con eso se escribió
 > la documentación en inglés, el último paso acordado:
