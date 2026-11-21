@@ -1,5 +1,7 @@
 # D2ScriptViewer
 
+**Español** · [English](README.en.md)
+
 Visor y editor de escritorio para `media\scripts.obsp` de **Darksiders II Deathinitive Edition**
 (PC), escrito en Python con solo la biblioteca estándar y tkinter.
 

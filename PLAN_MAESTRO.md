@@ -1,5 +1,21 @@
 # Plan maestro: D2ScriptViewer — visor y editor de `scripts.obsp` (Darksiders II Deathinitive Edition, PC)
 
+> **Fase 12 cerrada (2026-11-20): interfaz en inglés, con el idioma seleccionable.** El usuario
+> revisó la interfaz inglesa y la dio por buena («está bien así, por ahora»). Con eso se escribió
+> la documentación en inglés, el último paso acordado:
+>
+> - `README.en.md` y `GUIA_MODDER.en.md`, enlazados desde el principio de sus versiones en español,
+>   y estas a su vez desde ellos;
+> - la guía inglesa usa las rutas con el vocabulario inglés (`Functions.onInit.0x004E`) y explica
+>   que las dos formas valen en Ctrl+G;
+> - comprobado con el archivo real: las 20 rutas `objeto · propiedad` de las cuatro guías llevan a
+>   la fila que dicen (350, `true`, `'flag_quest_debug_question_asked'`, `Jump_Whoosh`, 2 y
+>   `op_3A NumSlots`), cada una en el idioma de su guía.
+>
+> Con ello se cumple el criterio 14 y quedan cumplidos los 14 de la sección 7 (detalle en las notas
+> de abajo). `CREDITS.md` no cambia: no entró material externo. La versión (sería la 1.2.0) y la
+> release las decide el usuario.
+
 > **Cambio de decisión (2026-11-20): la interfaz arranca en inglés por defecto.** Antes de
 > revisar el inglés, el usuario pidió que el idioma por defecto sea el inglés. Ya no se sigue el
 > idioma de Windows: manda `D2SV_LANG`, luego lo elegido en el menú «Idioma / Language» (guardado
@@ -50,7 +66,8 @@
 >     ahora comprueba el catálogo y construye la ventana en los dos idiomas: sí.
 > 13. **Suite:** 307 tests en verde con `D2SV_OBSP`, ninguno omitido: sí.
 > 14. **Documentación:** plan, `CLAUDE.md`, `CHANGELOG.md`, README y `GUIA_MODDER.md`: sí;
->     `README.en.md` y `GUIA_MODDER.en.md`: pendientes, tras la revisión. `CREDITS.md` no cambia.
+>     `README.en.md` y `GUIA_MODDER.en.md`: pendientes, tras la revisión (escritos el 2026-11-20,
+>     ver la nota de cierre). `CREDITS.md` no cambia.
 >
 > Detalles decididos al implementar:
 >

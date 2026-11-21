@@ -41,8 +41,9 @@ para la búsqueda global; sus dos tests con el archivo real (`RealTreeSearchTest
 publicada en GitHub el 19 de noviembre de 2026: fases 10 y 11, pruebas de audio y esquivas. Es la
 primera release; la 1.0.0 nunca se etiquetó. El repositorio es público. El push y las etiquetas
 los decide el usuario; para la 1.1.0 pidió que los hiciera Claude. Fase 12 (interfaz en inglés,
-con el idioma seleccionable) implementada el 19 de noviembre de 2026 y pendiente de la revisión
-del inglés por el usuario y de la documentación en inglés; sus decisiones, al principio del plan. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
+con el idioma seleccionable) cerrada el 20 de noviembre de 2026: menú «Idioma / Language» con
+cambio en caliente, inglés por defecto, y `README.en.md` y `GUIA_MODDER.en.md`; sus decisiones, al
+principio del plan. La versión 1.2.0 y su release las decide el usuario. Las decisiones de la sección 12 del plan están confirmadas: Python ≥ 3.10
 con tkinter/ttk, copia llamada `scripts.original.obsp` junto al archivo, copias rotativas (las
 últimas 5, en `.d2sv_backups\`) y licencia MIT a nombre de BOTProT800.
 
@@ -176,7 +177,9 @@ La GUI abre, por orden, el último archivo usado, `D2SV_OBSP` o el del juego.
   llama antes a `update()`.
 - `research/FORMATO.md`: hallazgos de formato fuera del apéndice A.
 - `GUIA_MODDER.md`: atajos de teclado y qué se suele modificar. Si cambias un atajo, un menú o
-  una prueba en el juego, actualízala en el mismo cambio.
+  una prueba en el juego, actualízala en el mismo cambio, y también su versión inglesa,
+  `GUIA_MODDER.en.md` (igual con `README.md` y `README.en.md`). La guía inglesa usa las rutas con
+  el vocabulario inglés (`Functions.onInit…`).
 
 Solo biblioteca estándar, sin dependencias externas. La CI (Windows, Python 3.10–3.13)
 lo comprueba importando los módulos sin instalar nada. Los tests que necesitan el

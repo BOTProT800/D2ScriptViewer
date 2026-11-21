@@ -1,5 +1,7 @@
 # Guía del modder
 
+**Español** · [English](GUIA_MODDER.en.md)
+
 Atajos de teclado de D2ScriptViewer y qué se suele modificar en `scripts.obsp`. El
 [README](README.md) explica la instalación, el guardado y los parches; esta guía es para
 trabajar con la herramienta día a día.

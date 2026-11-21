@@ -19,6 +19,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   filas fijas de los scripts y de los pares en inglés (`Functions.onInit.0x004E`, `[3].value`).
   Ctrl+G acepta los dos vocabularios en los dos idiomas. Los parches guardan siempre la etiqueta
   de siempre, así que uno creado en un idioma se aplica en el otro.
+- Documentación en inglés: `README.en.md` y `GUIA_MODDER.en.md`, enlazadas con sus versiones en
+  español.
 
 ### Changed
 
